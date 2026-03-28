@@ -685,6 +685,9 @@ app.whenReady().then(() => {
 
   if (app.isPackaged) {
     autoUpdater.checkForUpdates().catch(() => {});
+    setInterval(() => {
+      autoUpdater.checkForUpdates().catch(() => {});
+    }, 60 * 60 * 1000);
   }
 
   app.on("activate", () => {
