@@ -1,6 +1,6 @@
 {
   "name": "hope-review",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "H.O.P.E. Violation Review Desktop Application — Sovalius Corporation",
   "main": "electron/main.js",
   "scripts": {
@@ -13,6 +13,8 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
+    "@aws-sdk/client-ec2": "^3.1019.0",
+    "@aws-sdk/client-rds": "^3.1019.0",
     "@aws-sdk/client-s3": "^3.1018.0",
     "@aws-sdk/s3-request-presigner": "^3.1018.0",
     "bcryptjs": "^3.0.3",
