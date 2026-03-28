@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld("hopeDb", {
   updateService: (id, fields) =>
     ipcRenderer.invoke("db:update-service", id, fields),
   getSystemStatus: () => ipcRenderer.invoke("db:get-system-status"),
+  getCameraLanes: (cameraName) => ipcRenderer.invoke("db:get-camera-lanes", cameraName),
+  getAllCameraLanes: () => ipcRenderer.invoke("db:get-all-camera-lanes"),
+  saveCameraLanes: (cameraName, laneData, calWidth, calHeight) =>
+    ipcRenderer.invoke("db:save-camera-lanes", cameraName, laneData, calWidth, calHeight),
 });
 
 contextBridge.exposeInMainWorld("hopeAuth", {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { useDbData } from "./services/useDbData.js";
 import { getEvidenceUrls } from "./services/dbApi.js";
+import LaneConfigTab from "./components/LaneConfigTab.jsx";
 
 const SovMark=({size=20,color="#000"})=><svg width={size} height={size*.84} viewBox="1190 690 620 520" style={{flexShrink:0,display:"block"}}><g transform="translate(1313,909)"><path d="M0 0 C13.7 5 81.5 34.2 125.1 55.3 C232.9 107.5 349.5 164 413.6 195.1 C428.5 202.2 448.2 211.7 466 221 C458.7 223.6 439 226.1 407.1 230 C350.5 237 268.4 247.3 182.6 257.9 C113.4 266.5 37.1 276 -24.1 283.6 C-60.9 288.2 -84.5 291.2 -109 293 C-110.7 283 -113.7 265.5 -115 251 C-103.1 247.7 -85.1 244.3 -52.6 238 C-32 234.1 8.3 226.3 134.5 201.8 C155.2 197.8 193.6 190.3 248.3 179.6 C261.8 177 268 177 268 175 C262.8 174 254.4 170 241.6 163.7 C200.8 144.6 123.7 108.4 62.1 79.6 C28.9 63.9 -20.7 40.7 -58 23 C-53.6 19.1 -36.1 9.8 -17.9 0.1 C-11 -3.4 0 0 0 0 Z" fill={color}/></g><g transform="translate(1698,703)"><path d="M0 0 C-2.2 8 -8.8 22.2 -24.8 57.6 C-42.7 97.4 -58.6 132.6 -84.2 189.6 C-112.4 252.4 -120.4 270.3 -127 285 C-136.3 282.2 -156.9 272.6 -177 263 C-167 236.9 -159.2 217.1 -122 124 C-143 134.3 -203.5 163 -263.4 191.4 C-295.9 206.8 -309.3 213.4 -320 214 C-325.1 211.9 -340.9 204.3 -369 191 C-364 186.8 -350.5 179.9 -324.9 166.7 C-302.6 155.2 -248 127 -200.4 102.4 C-171.2 87.4 -142.8 72.6 -109.4 55.4 C-79.1 39.8 -50.3 24.9 -18.8 8.6 C-10.4 4.3 -2.1 0 0 0 Z" fill={color}/></g></svg>;
 const SovFull=({height=50,color="#000"})=><svg height={height} viewBox="200 690 1620 520" style={{display:"block",margin:"0 auto"}}><path d="M0 0 C3.4 2.9 6.8 5.9 10 9 C8.4 13 5.9 15 2.7 17.7 C1.7 18.5 0.8 19.3 -0.2 20.1 C-2.9 22 -4.7 22.6 -8 23 C-8.7 21.9 -8.7 21.9 -9.4 20.8 C-14.3 15.6 -21.3 12.4 -28.4 11.8 C-37.4 11.6 -46.1 12.9 -53 19 C-57.1 24.6 -57.9 30.2 -57 37 C-55.5 42.3 -52.4 44.7 -47.9 47.5 C-41.1 51 -33.8 53.4 -26.6 55.8 C-11.8 60.9 2 66.5 9.4 81.2 C12.7 90.5 12.8 103.6 9.4 112.8 C3.5 124.4 -4.9 131.5 -17 136 C-34.1 141.6 -52.9 140.4 -69 132.2 C-74.1 129.2 -80.9 124.9 -82.6 118.9 C-83 117 -80.8 115 -76.3 110.9 C-75.7 110.4 -75.1 109.8 -74.4 109.2 C-69.7 105 -69.7 105 -66.2 104.9 C-63.8 106.1 -62.8 107 -61.3 109.2 C-57.1 114.6 -50.7 117.7 -44 119 C-33.6 119.9 -24.6 118.3 -16.4 111.6 C-12 107.3 -10.9 104.1 -10.7 98.1 C-10.8 92.9 -11.6 89.4 -15.4 85.6 C-21.9 80.3 -29.4 78.1 -37.2 75.5 C-68.5 65.1 -68.5 65.1 -76.4 51.2 C-80.9 40.7 -81.1 28.6 -77.5 17.9 C-73 7.8 -64.1 -0.1 -54 -4.2 C-37.2 -10 -15 -11.1 0 0 Z" fill={color} transform="translate(303,934)"/><path d="M0 0 C14.1 11.9 21.9 30 24 48 C25.1 69.8 20.3 90.2 5.8 107.1 C-7.2 121 -25.2 129.5 -44.3 130.2 C-67 130.6 -86.4 124.9 -103.2 109.3 C-118 93.6 -123.8 73.5 -123.2 52.3 C-122.4 32.9 -114.6 14.3 -100.3 0.9 C-70.8 -23.1 -29.9 -23.3 0 0 Z M-88.8 19.3 C-99 31.8 -102.9 47.3 -101.8 63.2 C-99.7 78.3 -92 92.5 -80 102 C-67 109.9 -54.2 113 -38.9 110.5 C-24.7 107 -12.6 98.6 -5 86 C2.5 71.6 5 56.9 1 41 C-3.8 26.5 -12.1 14.8 -25.5 7.2 C-47.4 -3.6 -72.2 1.7 -88.8 19.3 Z" fill={color} transform="translate(458,943)"/><path d="M0 0 C6.9 0 13.9 0 21 0 C24.7 8.6 28.1 17.4 31.4 26.2 L36.8 40.8 C41 51.9 45.4 63.7 49 75 L60.2 102.3 C66.3 116.7 69.9 125.2 73.3 133.8 L74.5 136.8 C75.2 139.1 74.2 141.1 67 141.1 L52.2 141.1 C50.4 136.8 48.5 132.4 46.7 128 L42.1 117.2 L41.2 115.2 C40 112.3 39.2 110.3 39.2 107.1 C17.5 107.4 -4.3 107.8 -26.8 108.1 C-31 118.6 -35.2 129.1 -36.8 133 L-37.7 135.1 C-39.7 140 -40.8 141.1 -45.5 141.2 L-54.3 141.2 C-56.8 141.2 -59.3 141.1 -61.8 141.1 C-63 137.3 -62.3 136.4 -60.7 132.8 L-57.5 125.6 C-54.5 118.7 -49.7 107.9 -45.3 98 C-42.5 91.7 -39.7 85.4 -36.9 79 C-31.7 67.2 -26.4 55.3 -21.2 43.4 L-20.1 40.8 C-16.5 32.7 -13 24.6 -9.5 16.5 L-8 13.1 C-7.2 11.2 -6.3 9.2 -5.5 7.3 L-3.5 2.7 C-2.3 0.1 0 0 0 0 Z M6.2 28.1 C3.5 34.6 0.7 41 -2 47.5 L-8.9 63.6 L-10.2 66.5 C-13.2 73.6 -16 80.8 -18.8 88.1 C-2.6 88.1 13.6 88.1 30.2 88.1 C29.5 84.4 28.7 81.5 27.3 78 L24.8 71.9 L19.3 58.1 C18.4 55.8 17.4 53.4 16.5 51.1 C14.4 45.9 12.3 40.7 10.2 35.6 L7.2 28.1 Z" fill={color} transform="translate(670.8,928.9)"/><path d="M0 0 C6.9 0 13.9 0 21 0 C24.7 8.6 28.1 17.4 31.4 26.2 L36.8 40.8 C43.1 57.5 53.2 84.4 60.2 102.3 C66.3 116.7 69.9 125.2 73.3 133.8 L74.5 136.8 C75.2 139.1 74.2 141.1 67 141.1 L52 141 C44.2 121.9 36.8 102.5 29.5 83.2 L27 76.5 C23.7 67.9 20.5 59.4 17.2 50.8 L10.1 32.3 C8.8 28.9 7.5 25.5 6.2 22.2 L0.2 5.9 C-0.1 5.2 -0.6 3.8 -1 2 L0 0 Z M104 0 C107.1 -0.1 110.2 -0.1 113.4 -0.2 L121 -0.3 C121.7 -0.2 122.3 -0.1 123 0 C125 3 124.7 4.9 123.8 7 L121.7 12.2 L120.6 15.1 C119.4 18.2 118.1 21.4 116.9 24.5 C116 26.7 115.1 28.9 114.3 31.1 C112.4 35.7 110.6 40.4 108.8 45 C106.1 51.7 103.4 58.5 100.8 65.3 C90.9 90.5 81 115.8 71 141 C64.7 141 58.5 141 52 141 Z" fill={color} transform="translate(492,929)"/><path d="M0 0 L12.2 0 C14 0.1 15 1.1 15.1 5.8 L15.1 12.4 C15.1 19.2 15.1 24.5 15.1 27.6 C15.1 45.3 15.2 63 15.3 76.6 C15.1 98.4 16.1 98.4 26.6 116.9 C35.3 124 44.7 125.2 55.8 124.1 C62.1 122.7 68.7 120.4 72.8 115.1 C78.8 105.2 81.1 96 81.1 84.6 L81.2 72.9 C81.3 61.3 81.3 55.9 81.4 50.5 C81.5 33 81.6 18.2 81.6 9.6 L81.6 7.1 C81.7 1.2 82.8 0.1 86.8 0 L99 0 C100.8 0.1 101.8 1.1 102 10.1 L102 22.4 C102.1 37 102.1 48.5 102.2 60.2 C102.2 73.8 102.2 80.2 102.4 99.1 C100.9 116.3 87.5 131 75 142.6 C58.5 145 42.2 144.3 28.6 143.3 C17.4 138.2 7.9 128.4 -6.3 111.6 C-5.4 89.5 -5.4 68.8 -5.4 50.8 C-5.3 40.3 -5.4 31 -5.4 23 C-5.4 14.5 -5.4 9.1 -5.3 6.7 C-5.3 0 0 0 0 0 Z" fill={color} transform="translate(927.2,928.9)"/><path d="M0 0 L12.2 0 C14 0.1 15 1.1 15.1 6.5 L15.1 18.1 C15.1 33.2 15.1 54 15.1 77 C15 107.1 15 122.1 15.1 134.7 L15.1 137.8 C15 140.1 14 141.1 12.2 141.3 L0 141.3 C-2.2 141.3 -4 141.1 -5 140.1 C-5.1 136.5 -5.1 131.2 -5.1 123.2 C-5.1 108.1 -5.1 87.3 -5.1 58 C-5.1 38.6 -5.1 27 -5.1 16 C-5.1 8.9 -5.1 5.5 -5.1 3.4 C-4.9 -0.4 -3.5 0 0 0 Z" fill={color} transform="translate(872,928.9)"/><path d="M0 0 L12.2 0 C14 0.1 15 1.1 15.1 5.8 L15.1 25.7 C15.1 42.3 15.1 62.4 15.1 77 C15 107.1 15 122.1 15.8 122.1 C31.9 122.1 50.4 122.1 61.3 122 L71.2 122 C74.5 122 77 122.1 78 123.1 L78.1 134.1 C78.1 140 77 141.1 69.5 141.3 L59.2 141.3 C50 141.3 37.5 141.3 27.7 141.3 C16.5 141.3 8.6 141.3 3.5 141.3 C-3.9 141.2 -5 140.1 -5.1 134.7 C-5.1 124.5 -5.1 104.2 -5.1 80.7 C-5.1 58 -5.1 38.6 -5.1 27 C-5.1 16 -5.1 8.9 -5.1 3.4 C-4.9 -0.4 -3.5 0 0 0 Z" fill={color} transform="translate(771,928.9)"/><path d="M0 0 C3.4 2.9 6.8 5.9 10 9 C8.4 13 5.9 15 2.7 17.7 C-2.9 22 -4.7 22.6 -8 23 C-8.7 21.9 -14.3 15.6 -28.4 11.8 C-46.1 12.9 -53 19 -57.1 24.6 C-57.9 30.2 -57 37 -55.5 42.3 C-52.4 44.7 -41.1 51 -26.6 55.8 C-11.8 60.9 2 66.5 9.4 81.2 C12.7 90.5 12.8 103.6 9.4 112.8 C3.5 124.4 -4.9 131.5 -17 136 C-34.1 141.6 -52.9 140.4 -69 132.2 C-82.6 118.9 -83 117 -76.3 110.9 C-69.7 105 -66.2 104.9 -63.8 106.1 C-57.1 114.6 -50.7 117.7 -44 119 C-24.6 118.3 -12 107.3 -10.7 98.1 C-11.6 89.4 -21.9 80.3 -37.2 75.5 C-68.5 65.1 -76.4 51.2 -80.9 40.7 C-81.1 28.6 -77.5 17.9 -73 7.8 C-54 -4.2 -37.2 -10 0 0 Z" fill={color} transform="translate(1137,934)"/><g transform="translate(1313,909)"><path d="M0 0 C13.7 5 81.5 34.2 125.1 55.3 C232.9 107.5 349.5 164 413.6 195.1 C428.5 202.2 448.2 211.7 466 221 C458.7 223.6 439 226.1 407.1 230 C350.5 237 268.4 247.3 182.6 257.9 C113.4 266.5 37.1 276 -24.1 283.6 C-60.9 288.2 -84.5 291.2 -109 293 C-110.7 283 -113.7 265.5 -115 251 C-103.1 247.7 -85.1 244.3 -52.6 238 C-32 234.1 8.3 226.3 134.5 201.8 C155.2 197.8 193.6 190.3 248.3 179.6 C261.8 177 268 177 268 175 C262.8 174 254.4 170 241.6 163.7 C200.8 144.6 123.7 108.4 62.1 79.6 C28.9 63.9 -20.7 40.7 -58 23 C-53.6 19.1 -36.1 9.8 -17.9 0.1 C-11 -3.4 0 0 0 0 Z" fill={color}/></g><g transform="translate(1698,703)"><path d="M0 0 C-2.2 8 -8.8 22.2 -24.8 57.6 C-42.7 97.4 -58.6 132.6 -84.2 189.6 C-112.4 252.4 -120.4 270.3 -127 285 C-136.3 282.2 -156.9 272.6 -177 263 C-167 236.9 -159.2 217.1 -122 124 C-143 134.3 -203.5 163 -263.4 191.4 C-295.9 206.8 -309.3 213.4 -320 214 C-325.1 211.9 -340.9 204.3 -369 191 C-364 186.8 -350.5 179.9 -324.9 166.7 C-302.6 155.2 -248 127 -200.4 102.4 C-171.2 87.4 -142.8 72.6 -109.4 55.4 C-79.1 39.8 -50.3 24.9 -18.8 8.6 C-10.4 4.3 -2.1 0 0 0 Z" fill={color}/></g></svg>;
@@ -661,21 +662,7 @@ function Configure({user}){
   ]);
   const[showReq,sShowReq]=useState(false);
   const[confirmMsg,sConfirmMsg]=useState(null);
-  const[laneCam,sLaneCam]=useState("");
-  useEffect(()=>{if(cams.length>0&&!laneCam)sLaneCam(cams[0].id);},[cams,laneCam]);
-  const[lanes,sLanes]=useState({});// {camId: [{id,color,points:[{x,y}]}]}
-  const[activeLane,sActiveLane]=useState(null);
-  const[drawMode,sDrawMode]=useState(false);
-  const laneColors=["#a78bfa","#34d399","#f59e0b","#60a5fa","#f87171","#ec4899"];
-  const svgRef=useRef(null);
-
-  const camLanes=lanes[laneCam]||[];
-  const addLane=()=>{const nl={id:Date.now(),color:laneColors[camLanes.length%laneColors.length],points:[]};sLanes(p=>({...p,[laneCam]:[...(p[laneCam]||[]),nl]}));sActiveLane(nl.id);sDrawMode(true);};
-  const addPoint=(x,y)=>{if(!activeLane||!drawMode)return;sLanes(p=>{const cl=[...(p[laneCam]||[])];const li=cl.findIndex(l=>l.id===activeLane);if(li===-1)return p;cl[li]={...cl[li],points:[...cl[li].points,{x,y}]};return{...p,[laneCam]:cl};});};
-  const undoPoint=()=>{if(!activeLane)return;sLanes(p=>{const cl=[...(p[laneCam]||[])];const li=cl.findIndex(l=>l.id===activeLane);if(li===-1||cl[li].points.length===0)return p;cl[li]={...cl[li],points:cl[li].points.slice(0,-1)};return{...p,[laneCam]:cl};});};
-  const deleteLane=(id)=>{sLanes(p=>({...p,[laneCam]:(p[laneCam]||[]).filter(l=>l.id!==id)}));if(activeLane===id){sActiveLane(null);sDrawMode(false);}};
-  const clearAllLanes=()=>{sLanes(p=>({...p,[laneCam]:[]}));sActiveLane(null);sDrawMode(false);};
-  const handleSvgClick=(e)=>{if(!drawMode||!activeLane)return;const r=svgRef.current.getBoundingClientRect();const x=((e.clientX-r.left)/r.width*100);const y=((e.clientY-r.top)/r.height*100);addPoint(x,y);};
+  const laneCams=cams.map(c=>({id:c.id,name:c.name||c.id}));
 
   // Edit camera modal
   const EditModal=()=>{
@@ -843,88 +830,7 @@ function Configure({user}){
       </Glass>
     </div>}
 
-    {tab==="lanes"&&<div>
-      <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:16}}>
-        {/* Sidebar controls */}
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <Glass style={{padding:16}}>
-            <label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:8,fontWeight:600}}>Select Camera</label>
-            <select value={laneCam} onChange={e=>{sLaneCam(e.target.value);sActiveLane(null);sDrawMode(false);}} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${t.iBo}`,background:t.selBg,color:t.selC,fontSize:12,fontWeight:600,outline:"none"}}>
-              {cams.map(c=><option key={c.id} value={c.id} style={{background:t.selBg,color:t.selC}}>{c.name}</option>)}
-            </select>
-          </Glass>
-
-          <Glass style={{padding:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <h4 style={{margin:0,fontSize:13,fontWeight:700,color:t.tx}}>Lanes</h4>
-              <button onClick={addLane} style={{padding:"5px 12px",borderRadius:7,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}}>+ Add Lane</button>
-            </div>
-            {camLanes.length===0&&<p style={{fontSize:11,color:t.tF,margin:0,textAlign:"center",padding:"8px 0"}}>No lanes configured</p>}
-            {camLanes.map((lane,i)=>(<div key={lane.id} style={{padding:"8px 10px",borderRadius:8,marginBottom:6,background:activeLane===lane.id?"rgba(167,139,250,.1)":t.iB,border:`1px solid ${activeLane===lane.id?"rgba(167,139,250,.3)":t.iBo}`,cursor:"pointer"}} onClick={()=>{sActiveLane(lane.id);sDrawMode(true);}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:10,height:10,borderRadius:2,background:lane.color}}/>
-                  <span style={{fontSize:12,fontWeight:600,color:t.tx}}>Lane {i+1}</span>
-                  <span style={{fontSize:10,color:t.tD}}>{lane.points.length} pts</span>
-                </div>
-                <button onClick={e=>{e.stopPropagation();deleteLane(lane.id);}} style={{background:"none",border:"none",color:"#f87171",fontSize:12,cursor:"pointer",padding:2}}>✕</button>
-              </div>
-            </div>))}
-            {camLanes.length>0&&<div style={{display:"flex",gap:6,marginTop:8}}>
-              <button onClick={undoPoint} style={{flex:1,padding:"6px 0",borderRadius:7,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:10,fontWeight:600,cursor:"pointer"}}>↩ Undo</button>
-              <button onClick={clearAllLanes} style={{flex:1,padding:"6px 0",borderRadius:7,border:"1px solid rgba(248,113,113,.3)",background:"rgba(248,113,113,.06)",color:"#f87171",fontSize:10,fontWeight:600,cursor:"pointer"}}>Clear All</button>
-            </div>}
-          </Glass>
-
-          <Glass style={{padding:16}}>
-            <h4 style={{margin:"0 0 10px",fontSize:13,fontWeight:700,color:t.tx}}>Instructions</h4>
-            <div style={{fontSize:11,color:t.tD,lineHeight:1.6}}>
-              <p style={{margin:"0 0 6px"}}>1. Select a camera</p>
-              <p style={{margin:"0 0 6px"}}>2. Click "+ Add Lane" to start</p>
-              <p style={{margin:"0 0 6px"}}>3. Click on the canvas to place points</p>
-              <p style={{margin:"0 0 6px"}}>4. Points connect to form lane boundaries</p>
-              <p style={{margin:0}}>5. Add multiple lanes with different colors</p>
-            </div>
-          </Glass>
-        </div>
-
-        {/* Canvas */}
-        <Glass style={{overflow:"hidden"}}>
-          <div style={{padding:"10px 16px",borderBottom:`1px solid ${t.dv}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13,fontWeight:700,color:t.tx,fontFamily:"'JetBrains Mono',monospace"}}>{laneCam}</span>
-              {drawMode&&activeLane&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:5,background:"rgba(167,139,250,.15)",color:"#a78bfa",fontWeight:600}}>Drawing — click to place points</span>}
-            </div>
-            {drawMode&&<button onClick={()=>{sDrawMode(false);sActiveLane(null);}} style={{padding:"5px 12px",borderRadius:7,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:10,fontWeight:600,cursor:"pointer"}}>Done Drawing</button>}
-          </div>
-          <div style={{position:"relative",background:"linear-gradient(135deg,#0c0f1a,#141b2d,#0d1525)",aspectRatio:"16/9",cursor:drawMode?"crosshair":"default"}} onClick={handleSvgClick}>
-            {/* Simulated camera view */}
-            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <div style={{position:"absolute",width:300,height:300,borderRadius:"50%",background:"radial-gradient(circle,rgba(99,102,241,.08) 0%,transparent 70%)",top:"10%",left:"20%"}}/>
-              {/* Road markings */}
-              <div style={{position:"absolute",bottom:"15%",left:"20%",right:"20%",height:2,background:"rgba(255,255,255,.1)"}}/>
-              <div style={{position:"absolute",bottom:"40%",left:"30%",right:"30%",height:2,background:"rgba(255,255,255,.06)"}}/>
-              <div style={{position:"absolute",bottom:"60%",left:"38%",right:"38%",height:1,background:"rgba(255,255,255,.04)"}}/>
-              {/* Perspective lines */}
-              <div style={{position:"absolute",bottom:0,left:"10%",width:2,height:"100%",background:"rgba(255,255,255,.03)",transformOrigin:"bottom center",transform:"rotate(15deg)"}}/>
-              <div style={{position:"absolute",bottom:0,right:"10%",width:2,height:"100%",background:"rgba(255,255,255,.03)",transformOrigin:"bottom center",transform:"rotate(-15deg)"}}/>
-              {!drawMode&&camLanes.length===0&&<p style={{color:"rgba(255,255,255,.2)",fontSize:14,fontWeight:600,zIndex:1}}>Select a camera and add lanes</p>}
-            </div>
-            {/* SVG overlay for lanes */}
-            <svg ref={svgRef} style={{position:"absolute",inset:0,width:"100%",height:"100%"}} viewBox="0 0 100 100" preserveAspectRatio="none">
-              {camLanes.map(lane=>(
-                <g key={lane.id}>
-                  {lane.points.length>1&&<polyline points={lane.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={lane.color} strokeWidth={activeLane===lane.id?.4:.25} strokeLinecap="round" strokeLinejoin="round" opacity={activeLane===lane.id?1:.6}/>}
-                  {/* Close the shape if 3+ points */}
-                  {lane.points.length>=3&&<polyline points={[...lane.points,lane.points[0]].map(p=>`${p.x},${p.y}`).join(" ")} fill={`${lane.color}08`} stroke={lane.color} strokeWidth={activeLane===lane.id?.3:.15} strokeDasharray={activeLane===lane.id?"none":".5,.5"} opacity={.4}/>}
-                  {lane.points.map((p,i)=>(<circle key={i} cx={p.x} cy={p.y} r={activeLane===lane.id?.8:.5} fill={lane.color} stroke="#fff" strokeWidth={.15}/>))}
-                </g>
-              ))}
-            </svg>
-          </div>
-        </Glass>
-      </div>
-    </div>}
+    {tab==="lanes"&&<LaneConfigTab cameras={laneCams} theme={t}/>}
   </div>);
 }
 
@@ -990,8 +896,7 @@ export default function App(){
 
   if(!booted)return <SplashScreen onDone={()=>setBooted(true)}/>;
 
-  const showUpdate=updInfo&&(updInfo.status==="available"||updInfo.status==="downloading"||updInfo.status==="ready")&&!updDismissed&&skippedVer!==updInfo.version;
-  if(showUpdate&&!user)return <UpdatePrompt info={updInfo} onUpdate={()=>{if(updInfo.status==="ready"){window.hopeUpdater?.install();}else{window.hopeUpdater?.download();}}} onSkip={()=>{setSkippedVer(updInfo.version);localStorage.setItem("hope_skipped_ver",updInfo.version);sUpdDismissed(true);}} onLater={()=>sUpdDismissed(true)}/>;
+  const updateReady=updInfo&&updInfo.status==="ready"&&!updDismissed;
 
   if(!user)return(<><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/><style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}`}</style><Login onLogin={handleLogin}/></>);
 
@@ -1039,6 +944,11 @@ export default function App(){
           <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:3,background:db.dbConnected?"#34d399":db.dbError?"#f87171":"#f59e0b"}}/>
           <span style={{fontSize:9}}>{db.dbConnected?"DB Connected":db.dbError?"DB Offline":"Demo Mode"}</span></span>
         </div>
+        {updateReady&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9999,background:"linear-gradient(135deg,rgba(99,102,241,.95),rgba(139,92,246,.95))",backdropFilter:"blur(12px)",padding:"10px 28px",display:"flex",alignItems:"center",justifyContent:"center",gap:16,borderTop:"1px solid rgba(255,255,255,.1)"}}>
+          <span style={{fontSize:12,fontWeight:600,color:"#fff"}}>Update v{updInfo.version} downloaded — will install on restart</span>
+          <button onClick={()=>window.hopeUpdater?.install()} style={{padding:"5px 14px",borderRadius:7,border:"1px solid rgba(255,255,255,.3)",background:"rgba(255,255,255,.15)",color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer"}}>Restart Now</button>
+          <button onClick={()=>sUpdDismissed(true)} style={{background:"none",border:"none",color:"rgba(255,255,255,.6)",fontSize:14,cursor:"pointer",padding:"2px 6px"}}>✕</button>
+        </div>}
       </div>
     </CC.Provider></KbC.Provider></StC.Provider></ThC.Provider>
   );

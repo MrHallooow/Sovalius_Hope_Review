@@ -66,6 +66,21 @@ export async function getEvidenceUrls(remoteClipUrl, remoteScreenshotUrl, remote
   return window.hopeEvidence.getUrls(remoteClipUrl, remoteScreenshotUrl, remoteRawClipUrl);
 }
 
+export async function getCameraLanes(cameraName) {
+  if (!isElectron) return { ok: false, data: null, error: "No DB (demo mode)" };
+  return window.hopeDb.getCameraLanes(cameraName);
+}
+
+export async function getAllCameraLanes() {
+  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  return window.hopeDb.getAllCameraLanes();
+}
+
+export async function saveCameraLanes(cameraName, laneData, calWidth, calHeight) {
+  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  return window.hopeDb.saveCameraLanes(cameraName, laneData, calWidth, calHeight);
+}
+
 export function isDbAvailable() {
   return !!isElectron;
 }

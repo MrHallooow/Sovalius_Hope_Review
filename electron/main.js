@@ -548,6 +548,50 @@ ipcMain.handle("evidence:get-urls", async (_event, rawClipUrl, rawScreenshotUrl,
   }
 });
 
+// ── Camera Lanes ──
+
+ipcMain.handle("db:get-camera-lanes", async (_event, cameraName) => {
+  try {
+    if (!pool) createPool();
+    const { rows } = await pool.query(
+      "SELECT lane_data, calibration_width, calibration_height FROM camera_lanes WHERE camera_name = $1",
+      [cameraName]
+    );
+    if (rows.length === 0) return { ok: true, data: null };
+    return { ok: true, data: rows[0] };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle("db:get-all-camera-lanes", async () => {
+  try {
+    if (!pool) createPool();
+    const { rows } = await pool.query(
+      "SELECT camera_name, lane_data, calibration_width, calibration_height, updated_at FROM camera_lanes ORDER BY camera_name"
+    );
+    return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, error: err.message, rows: [] };
+  }
+});
+
+ipcMain.handle("db:save-camera-lanes", async (_event, cameraName, laneData, calWidth, calHeight) => {
+  try {
+    if (!pool) createPool();
+    await pool.query(
+      `INSERT INTO camera_lanes (camera_name, lane_data, calibration_width, calibration_height, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (camera_name)
+       DO UPDATE SET lane_data = $2, calibration_width = $3, calibration_height = $4, updated_at = NOW()`,
+      [cameraName, JSON.stringify(laneData), calWidth || 0, calHeight || 0]
+    );
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ── Auto-updater ──
 
 function sendUpdateStatus(status, data = {}) {
@@ -558,7 +602,7 @@ function sendUpdateStatus(status, data = {}) {
 }
 
 function setupAutoUpdater() {
-  autoUpdater.autoDownload = false;
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on("checking-for-update", () => {
