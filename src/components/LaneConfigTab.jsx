@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { getCameraLanes, saveCameraLanes } from "../services/dbApi.js";
+import { getCameraLanes, getAllCameraLanes, saveCameraLanes } from "../services/dbApi.js";
 
 const ZONE_TYPES = [
   { value: "lane", label: "Lane", subtypes: ["traffic_lane","bus_lane","bike_lane","hov_lane","emergency_lane"] },
@@ -78,10 +78,23 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.sqrt((px - (x1 + t * dx)) ** 2 + (py - (y1 + t * dy)) ** 2);
 }
 
-export default function LaneConfigTab({ cameras, theme: t }) {
+export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   const aC = t.aC || "#6366f1";
 
-  const [camera, setCamera] = useState(() => cameras?.[0]?.name || "");
+  const [dbCameras, setDbCameras] = useState([]);
+  const cameras = (() => {
+    const seen = new Set();
+    const merged = [];
+    for (const c of (propCameras || [])) {
+      if (!seen.has(c.name)) { seen.add(c.name); merged.push(c); }
+    }
+    for (const c of dbCameras) {
+      if (!seen.has(c.name)) { seen.add(c.name); merged.push(c); }
+    }
+    return merged;
+  })();
+
+  const [camera, setCamera] = useState("");
   const [zones, setZones] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [mode, setMode] = useState("select");
@@ -96,6 +109,7 @@ export default function LaneConfigTab({ cameras, theme: t }) {
   const [calHeight, setCalHeight] = useState(1080);
   const [dragPointIdx, setDragPointIdx] = useState(null);
   const [dragZoneId, setDragZoneId] = useState(null);
+  const [bgFrameUrl, setBgFrameUrl] = useState(null);
 
   const svgRef = useRef(null);
   const isDragging = useRef(false);
@@ -162,7 +176,17 @@ export default function LaneConfigTab({ cameras, theme: t }) {
   });
 
   useEffect(() => {
-    if (cameras?.length && !cameras.find(c => c.name === camera)) {
+    getAllCameraLanes().then(res => {
+      if (res?.ok && res.rows?.length) {
+        setDbCameras(res.rows.map(r => ({ id: r.camera_name, name: r.camera_name })));
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (cameras?.length && !camera) {
+      setCamera(cameras[0].name);
+    } else if (cameras?.length && !cameras.find(c => c.name === camera)) {
       setCamera(cameras[0].name);
     }
   }, [cameras, camera]);
@@ -204,6 +228,9 @@ export default function LaneConfigTab({ cameras, theme: t }) {
           (ld.no_parking_zones || []).forEach(z => newZones.push(mk(z, "no_parking", "no_parking")));
           if (res.data.calibration_width) setCalWidth(res.data.calibration_width);
           if (res.data.calibration_height) setCalHeight(res.data.calibration_height);
+          setBgFrameUrl(res.data.background_frame_presigned || null);
+        } else {
+          setBgFrameUrl(null);
         }
         setZones(newZones);
         const snap = JSON.parse(JSON.stringify(newZones));
@@ -216,6 +243,7 @@ export default function LaneConfigTab({ cameras, theme: t }) {
       })
       .catch(() => {
         setZones([]);
+        setBgFrameUrl(null);
         histRef.current = { stack: [[]], idx: 0 };
         syncHistState();
         setLoading(false);
@@ -660,7 +688,16 @@ export default function LaneConfigTab({ cameras, theme: t }) {
                 onClick={handleSvgClick}
                 onMouseMove={handleSvgMouseMove}
               >
-                {[0.25, 0.5, 0.75].map(v => (
+                {bgFrameUrl && (
+                  <image
+                    href={bgFrameUrl}
+                    x="0" y="0" width="1" height="1"
+                    preserveAspectRatio="xMidYMid slice"
+                    opacity="0.55"
+                    style={{ pointerEvents: "none" }}
+                  />
+                )}
+                {!bgFrameUrl && [0.25, 0.5, 0.75].map(v => (
                   <g key={v}>
                     <line x1={v} y1={0} x2={v} y2={1} stroke="rgba(255,255,255,0.05)" strokeWidth={0.001} />
                     <line x1={0} y1={v} x2={1} y2={v} stroke="rgba(255,255,255,0.05)" strokeWidth={0.001} />

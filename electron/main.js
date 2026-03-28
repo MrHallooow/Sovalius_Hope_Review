@@ -554,11 +554,28 @@ ipcMain.handle("db:get-camera-lanes", async (_event, cameraName) => {
   try {
     if (!pool) createPool();
     const { rows } = await pool.query(
-      "SELECT lane_data, calibration_width, calibration_height FROM camera_lanes WHERE camera_name = $1",
+      "SELECT lane_data, calibration_width, calibration_height, background_frame_url, background_frame_at FROM camera_lanes WHERE camera_name = $1",
       [cameraName]
     );
     if (rows.length === 0) return { ok: true, data: null };
-    return { ok: true, data: rows[0] };
+    const row = rows[0];
+    if (row.background_frame_url) {
+      try {
+        const s3 = getS3Client();
+        const bucket = process.env.S3_BUCKET;
+        const bgKey = extractS3Key(row.background_frame_url);
+        if (s3 && bucket && bgKey) {
+          const { GetObjectCommand } = require("@aws-sdk/client-s3");
+          const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+          row.background_frame_presigned = await getSignedUrl(
+            s3, new GetObjectCommand({ Bucket: bucket, Key: bgKey }), { expiresIn: 3600 }
+          );
+        }
+      } catch (e) {
+        console.warn("Failed to generate presigned URL for background frame:", e.message);
+      }
+    }
+    return { ok: true, data: row };
   } catch (err) {
     return { ok: false, error: err.message };
   }
