@@ -687,7 +687,7 @@ app.whenReady().then(() => {
     autoUpdater.checkForUpdates().catch(() => {});
     setInterval(() => {
       autoUpdater.checkForUpdates().catch(() => {});
-    }, 60 * 60 * 1000);
+    }, 5 * 60 * 1000);
   }
 
   app.on("activate", () => {
