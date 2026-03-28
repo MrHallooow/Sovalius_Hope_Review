@@ -1,0 +1,44 @@
+appId: com.sovalius.hope-review
+productName: "HOPE Review"
+copyright: "Copyright (c) 2026 Sovalius Corporation"
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - "electron/**/*"
+  - "dist-renderer/**/*"
+  - "node_modules/**/*"
+  - "package.json"
+
+forceCodeSigning: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "HOPE-Review-Setup-${version}.${ext}"
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "HOPE Review"
+
+extraResources:
+  - from: ".env"
+    to: ".env"
+    filter:
+      - "**/*"
+
+publish:
+  provider: github
+  owner: MrHallooow
+  repo: Sovalius_Hope_Review
+  releaseType: release
