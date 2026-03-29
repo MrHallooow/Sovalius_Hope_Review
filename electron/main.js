@@ -611,8 +611,16 @@ ipcMain.handle("db:save-camera-lanes", async (_event, cameraName, laneData, calW
 
 // ── Auto-updater ──
 
+let splashWin = null;
+
+function sendSplash(js) {
+  if (splashWin && !splashWin.isDestroyed()) {
+    splashWin.webContents.executeJavaScript(js).catch(() => {});
+  }
+}
+
 function sendUpdateStatus(status, data = {}) {
-  const wins = BrowserWindow.getAllWindows();
+  const wins = BrowserWindow.getAllWindows().filter((w) => w !== splashWin);
   if (wins.length > 0) {
     wins[0].webContents.send("update-status", { status, ...data });
   }
@@ -650,6 +658,88 @@ function setupAutoUpdater() {
   });
 }
 
+function createSplash() {
+  splashWin = new BrowserWindow({
+    width: 360,
+    height: 220,
+    frame: false,
+    resizable: false,
+    transparent: true,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  splashWin.loadFile(path.join(__dirname, "splash.html"));
+  splashWin.on("closed", () => { splashWin = null; });
+  return splashWin;
+}
+
+function checkForUpdateOnSplash() {
+  return new Promise((resolve) => {
+    const TIMEOUT_MS = 15000;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (splashWin && !splashWin.isDestroyed()) {
+        splashWin.close();
+      }
+      resolve();
+    };
+
+    const timeout = setTimeout(() => {
+      sendSplash(`document.getElementById('status').textContent='Starting…'`);
+      finish();
+    }, TIMEOUT_MS);
+
+    autoUpdater.once("update-not-available", () => {
+      clearTimeout(timeout);
+      sendSplash(`document.getElementById('status').textContent='Up to date'`);
+      setTimeout(finish, 600);
+    });
+
+    autoUpdater.once("error", () => {
+      clearTimeout(timeout);
+      sendSplash(`document.getElementById('status').textContent='Starting…'`);
+      setTimeout(finish, 400);
+    });
+
+    autoUpdater.once("update-available", (info) => {
+      clearTimeout(timeout);
+      sendSplash(
+        `document.getElementById('status').textContent='Downloading v${info.version}…'`
+      );
+    });
+
+    autoUpdater.on("download-progress", (prog) => {
+      const pct = Math.round(prog.percent);
+      sendSplash(`
+        document.getElementById('status').textContent='Downloading… ${pct}%';
+        var b=document.getElementById('bar');
+        b.classList.remove('indeterminate');
+        b.style.width='${pct}%';
+      `);
+    });
+
+    autoUpdater.once("update-downloaded", (info) => {
+      clearTimeout(timeout);
+      sendSplash(
+        `document.getElementById('status').textContent='Installing v${info.version}…'`
+      );
+      setTimeout(() => {
+        autoUpdater.quitAndInstall(false, true);
+      }, 1000);
+    });
+
+    autoUpdater.checkForUpdates().catch(() => {
+      clearTimeout(timeout);
+      finish();
+    });
+  });
+}
+
 ipcMain.handle("updater:check", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();
@@ -678,13 +768,18 @@ ipcMain.handle("updater:get-version", () => {
 
 // ── App lifecycle ──
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createPool();
-  createWindow();
   setupAutoUpdater();
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdates().catch(() => {});
+    createSplash();
+    await checkForUpdateOnSplash();
+  }
+
+  createWindow();
+
+  if (app.isPackaged) {
     setInterval(() => {
       autoUpdater.checkForUpdates().catch(() => {});
     }, 5 * 60 * 1000);

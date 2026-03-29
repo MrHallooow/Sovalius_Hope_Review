@@ -5,13 +5,14 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.5.4";
-const NAME = "v1.5.4";
-const BODY = `- Fix .env inclusion: bake into asar so auto-updates always carry credentials`;
+const TAG = "v1.5.5";
+const NAME = "v1.5.5";
+const BODY = `- Add splash screen that checks for updates on launch before login
+- Auto-downloads and installs updates before showing main window`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.5.4.exe",
-  "dist/HOPE-Review-Setup-1.5.4.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.5.5.exe",
+  "dist/HOPE-Review-Setup-1.5.5.exe.blockmap",
   "dist/latest.yml",
 ];
 

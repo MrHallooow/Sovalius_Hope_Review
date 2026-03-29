@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0e1a;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      -webkit-app-region: drag;
+      user-select: none;
+      overflow: hidden;
+    }
+    .logo {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 32px;
+    }
+    .status {
+      font-size: 12px;
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 12px;
+      min-height: 16px;
+    }
+    .bar-track {
+      width: 220px;
+      height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #7c5cfc, #a78bfa);
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .bar-fill.indeterminate {
+      width: 40%;
+      animation: slide 1.2s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(550%); }
+    }
+    .version {
+      position: fixed;
+      bottom: 10px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">H.O.P.E.</div>
+  <div class="subtitle">HELP &middot; OBSERVE &middot; PROTECT &middot; ENFORCE</div>
+  <div class="status" id="status">Checking for updates&hellip;</div>
+  <div class="bar-track">
+    <div class="bar-fill indeterminate" id="bar"></div>
+  </div>
+  <div class="version" id="ver"></div>
+</body>
+</html>
