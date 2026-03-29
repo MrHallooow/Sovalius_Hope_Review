@@ -1,6 +1,6 @@
 {
   "name": "hope-review",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "H.O.P.E. Violation Review Desktop Application — Sovalius Corporation",
   "main": "electron/main.js",
   "scripts": {
