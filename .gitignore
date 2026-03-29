@@ -2,6 +2,7 @@ node_modules/
 dist-renderer/
 dist/
 .env
+env.production
 *.exe
 *.blockmap
 *.yml.bak

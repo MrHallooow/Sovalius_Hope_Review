@@ -5,17 +5,14 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.6.0";
-const NAME = "v1.6.0";
-const BODY = `- New lane drawing workflow: draw road boundary, draw lane dividers, generate lanes automatically
-- Matches HOPE device lane configuration UX
-- Scanline section generation with edge-snapping dividers
-- Click generated sections to assign as lanes
-- Existing zone drawing (virtual lines, detection zones, etc.) unchanged`;
+const TAG = "v1.6.1";
+const NAME = "v1.6.1";
+const BODY = `- Fix: bake credentials into asar as env.production (dotfiles silently skipped by electron-builder)
+- Guarantees login works on every auto-update without manual file copy`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.6.0.exe",
-  "dist/HOPE-Review-Setup-1.6.0.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.6.1.exe",
+  "dist/HOPE-Review-Setup-1.6.1.exe.blockmap",
   "dist/latest.yml",
 ];
 

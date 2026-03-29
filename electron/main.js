@@ -11,6 +11,7 @@ const rootDir = isDev
   : path.dirname(app.getPath("exe"));
 
 const envCandidates = [
+  path.join(__dirname, "..", "env.production"),
   path.join(rootDir, ".env"),
   path.join(process.resourcesPath || rootDir, ".env"),
   path.join(__dirname, "..", ".env"),
