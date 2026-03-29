@@ -149,6 +149,22 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
     syncHistState();
   }, [syncHistState]);
 
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (
+        (e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))
+      ) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo]);
+
   const inputStyle = {
     width: "100%", boxSizing: "border-box",
     background: "rgba(0,0,0,0.3)",
@@ -669,7 +685,7 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
             {mode === "select" ? "Select Mode" : mode === "draw" ? "Draw Mode" : "Edit Points"}
           </div>
         </div>
-        <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, overflow: "hidden" }}>
+        <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 12, overflow: "hidden" }}>
           <div style={{ width: "100%", maxHeight: "100%", aspectRatio: `${calWidth} / ${calHeight}`, position: "relative" }}>
             {loading ? (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: t.tD || "#888", fontSize: 14 }}>

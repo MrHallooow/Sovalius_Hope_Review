@@ -5,14 +5,15 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.5.2";
-const NAME = "v1.5.2";
-const BODY = `- Fix lane drawing canvas sizing: fills available space while respecting height constraint
-- Flex container uses definite height (flex-basis: 0) so maxHeight percentage resolves correctly`;
+const TAG = "v1.5.3";
+const NAME = "v1.5.3";
+const BODY = `- Move lane drawing canvas to top of viewport
+- Add Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+- Fix .env bundling so login works in packaged app`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.5.2.exe",
-  "dist/HOPE-Review-Setup-1.5.2.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.5.3.exe",
+  "dist/HOPE-Review-Setup-1.5.3.exe.blockmap",
   "dist/latest.yml",
 ];
 

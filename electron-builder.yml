@@ -34,8 +34,6 @@ nsis:
 extraResources:
   - from: ".env"
     to: ".env"
-    filter:
-      - "**/*"
 
 publish:
   provider: github
