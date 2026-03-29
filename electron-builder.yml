@@ -11,6 +11,7 @@ files:
   - "dist-renderer/**/*"
   - "node_modules/**/*"
   - "package.json"
+  - ".env"
 
 forceCodeSigning: false
 

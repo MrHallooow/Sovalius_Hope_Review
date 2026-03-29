@@ -5,15 +5,13 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.5.3";
-const NAME = "v1.5.3";
-const BODY = `- Move lane drawing canvas to top of viewport
-- Add Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
-- Fix .env bundling so login works in packaged app`;
+const TAG = "v1.5.4";
+const NAME = "v1.5.4";
+const BODY = `- Fix .env inclusion: bake into asar so auto-updates always carry credentials`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.5.3.exe",
-  "dist/HOPE-Review-Setup-1.5.3.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.5.4.exe",
+  "dist/HOPE-Review-Setup-1.5.4.exe.blockmap",
   "dist/latest.yml",
 ];
 
