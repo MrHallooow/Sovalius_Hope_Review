@@ -5,14 +5,17 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.5.5";
-const NAME = "v1.5.5";
-const BODY = `- Add splash screen that checks for updates on launch before login
-- Auto-downloads and installs updates before showing main window`;
+const TAG = "v1.6.0";
+const NAME = "v1.6.0";
+const BODY = `- New lane drawing workflow: draw road boundary, draw lane dividers, generate lanes automatically
+- Matches HOPE device lane configuration UX
+- Scanline section generation with edge-snapping dividers
+- Click generated sections to assign as lanes
+- Existing zone drawing (virtual lines, detection zones, etc.) unchanged`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.5.5.exe",
-  "dist/HOPE-Review-Setup-1.5.5.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.6.0.exe",
+  "dist/HOPE-Review-Setup-1.6.0.exe.blockmap",
   "dist/latest.yml",
 ];
 

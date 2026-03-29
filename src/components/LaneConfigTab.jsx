@@ -78,6 +78,141 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.sqrt((px - (x1 + t * dx)) ** 2 + (py - (y1 + t * dy)) ** 2);
 }
 
+function snapToPolygonEdge(point, polygon, snapDist = 0.025) {
+  if (!polygon || polygon.length < 2) return point;
+  const [px, py] = point;
+  let best = point, bestD = Infinity;
+  for (let i = 0; i < polygon.length; i++) {
+    const [x1, y1] = polygon[i];
+    const [x2, y2] = polygon[(i + 1) % polygon.length];
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+    const nx = x1 + t * dx, ny = y1 + t * dy;
+    const d = Math.sqrt((px - nx) ** 2 + (py - ny) ** 2);
+    if (d < bestD) { bestD = d; best = [nx, ny]; }
+  }
+  return bestD <= snapDist ? best : point;
+}
+
+function getPolygonXAtY(polygon, y) {
+  const xs = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const [x1, y1] = polygon[i];
+    const [x2, y2] = polygon[(i + 1) % polygon.length];
+    if ((y1 <= y && y <= y2) || (y2 <= y && y <= y1)) {
+      if (y1 === y2) { xs.push(x1, x2); }
+      else { xs.push(x1 + (y - y1) / (y2 - y1) * (x2 - x1)); }
+    }
+  }
+  return xs;
+}
+
+function getPolylineXAtY(polyline, y) {
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const [x1, y1] = polyline[i];
+    const [x2, y2] = polyline[i + 1];
+    if ((y1 <= y && y <= y2) || (y2 <= y && y <= y1)) {
+      if (y1 === y2) return (x1 + x2) / 2;
+      return x1 + (y - y1) / (y2 - y1) * (x2 - x1);
+    }
+  }
+  return null;
+}
+
+function splitRoadIntoSections(road, dividerList) {
+  if (!road || road.length < 3) return [];
+  const dividers = dividerList.filter(d => d.length >= 2)
+    .sort((a, b) => {
+      const avgA = a.reduce((s, p) => s + p[0], 0) / a.length;
+      const avgB = b.reduce((s, p) => s + p[0], 0) / b.length;
+      return avgA - avgB;
+    });
+  if (!dividers.length) return [road.slice()];
+
+  const ys = road.map(p => p[1]);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const yRange = maxY - minY;
+  if (yRange < 1e-6) return [road.slice()];
+
+  const divTops = [], divBots = [];
+  for (const d of dividers) {
+    if (d[0][1] < d[d.length - 1][1]) { divTops.push(d[0]); divBots.push(d[d.length - 1]); }
+    else { divTops.push(d[d.length - 1]); divBots.push(d[0]); }
+  }
+
+  const topThresh = minY + yRange * 0.25, botThresh = maxY - yRange * 0.25;
+  let topPts = road.filter(p => p[1] <= topThresh);
+  let botPts = road.filter(p => p[1] >= botThresh);
+  if (topPts.length < 2) topPts = [...road].sort((a, b) => a[1] - b[1]).slice(0, 2);
+  if (botPts.length < 2) botPts = [...road].sort((a, b) => b[1] - a[1]).slice(0, 2);
+  const TL = [...topPts].sort((a, b) => a[0] - b[0])[0];
+  const TR = [...topPts].sort((a, b) => b[0] - a[0])[0];
+  const BL = [...botPts].sort((a, b) => a[0] - b[0])[0];
+  const BR = [...botPts].sort((a, b) => b[0] - a[0])[0];
+
+  const numScan = 60;
+  const step = yRange / (numScan + 1);
+  const scanYSet = new Set();
+  for (let i = 1; i <= numScan; i++) scanYSet.add(minY + step * i);
+  [0.1, 0.3].forEach(f => { scanYSet.add(minY + step * f); scanYSet.add(maxY - step * f); });
+  const sortedYs = [...scanYSet].sort((a, b) => a - b);
+
+  const scanData = [];
+  for (const y of sortedYs) {
+    const bxs = getPolygonXAtY(road, y);
+    if (bxs.length < 2) continue;
+    const left = Math.min(...bxs), right = Math.max(...bxs);
+    const row = [left];
+    for (const d of dividers) {
+      const dx = getPolylineXAtY(d, y);
+      if (dx !== null && dx >= left && dx <= right) row.push(dx);
+    }
+    row.push(right);
+    row.sort((a, b) => a - b);
+    if (row.length >= 2) scanData.push({ y, xs: row });
+  }
+  if (scanData.length < 2) return [road.slice()];
+
+  const numSections = dividers.length + 1;
+  const sections = [];
+  for (let si = 0; si < numSections; si++) {
+    const lPts = [], rPts = [];
+    const isFirst = si === 0, isLast = si === numSections - 1;
+    if (isFirst && TL) lPts.push(TL); else if (si - 1 >= 0 && si - 1 < divTops.length) lPts.push(divTops[si - 1]);
+    if (si < divTops.length) rPts.push(divTops[si]); else if (isLast && TR) rPts.push(TR);
+    for (const { y, xs } of scanData) {
+      if (si < xs.length - 1) { lPts.push([xs[si], y]); rPts.push([xs[si + 1], y]); }
+    }
+    if (isFirst && BL) lPts.push(BL); else if (si - 1 >= 0 && si - 1 < divBots.length) lPts.push(divBots[si - 1]);
+    if (si < divBots.length) rPts.push(divBots[si]); else if (isLast && BR) rPts.push(BR);
+
+    if (lPts.length >= 2 && rPts.length >= 2) {
+      lPts.sort((a, b) => a[1] - b[1]);
+      rPts.sort((a, b) => a[1] - b[1]);
+      const poly = [...lPts, ...rPts.reverse()];
+      const cleaned = [poly[0]];
+      for (let i = 1; i < poly.length; i++) {
+        const prev = cleaned[cleaned.length - 1];
+        if (Math.abs(poly[i][0] - prev[0]) > 1e-6 || Math.abs(poly[i][1] - prev[1]) > 1e-6)
+          cleaned.push(poly[i]);
+      }
+      if (cleaned.length >= 3) sections.push(cleaned);
+    }
+  }
+  return sections;
+}
+
+const SECTION_PALETTE = [
+  "rgba(76,175,80,0.3)", "rgba(33,150,243,0.3)", "rgba(255,152,0,0.3)",
+  "rgba(156,39,176,0.3)", "rgba(244,67,54,0.3)", "rgba(0,188,212,0.3)",
+  "rgba(255,235,59,0.3)", "rgba(121,85,72,0.3)",
+];
+const SECTION_STROKES = [
+  "#4caf50", "#2196f3", "#ff9800", "#9c27b0", "#f44336", "#00bcd4", "#ffeb3b", "#795548",
+];
+
 export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   const aC = t.aC || "#6366f1";
 
@@ -110,6 +245,14 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   const [dragPointIdx, setDragPointIdx] = useState(null);
   const [dragZoneId, setDragZoneId] = useState(null);
   const [bgFrameUrl, setBgFrameUrl] = useState(null);
+
+  const [roadBoundary, setRoadBoundary] = useState([]);
+  const [laneDividers, setLaneDividers] = useState([]);
+  const [generatedSections, setGeneratedSections] = useState([]);
+  const [drawPhase, setDrawPhase] = useState(null);
+  const [currentRoadPoints, setCurrentRoadPoints] = useState([]);
+  const [currentDividerPoints, setCurrentDividerPoints] = useState([]);
+  const [hoveredSection, setHoveredSection] = useState(null);
 
   const svgRef = useRef(null);
   const isDragging = useRef(false);
@@ -255,6 +398,13 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
         setSelectedId(null);
         setCurrentPoints([]);
         setMode("select");
+        setDrawPhase(null);
+        setRoadBoundary([]);
+        setLaneDividers([]);
+        setGeneratedSections([]);
+        setCurrentRoadPoints([]);
+        setCurrentDividerPoints([]);
+        setHoveredSection(null);
         setLoading(false);
       })
       .catch(() => {
@@ -267,7 +417,12 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   }, [camera, syncHistState]);
 
   useEffect(() => {
-    if (mode !== "draw") setCurrentPoints([]);
+    if (mode !== "draw") {
+      setCurrentPoints([]);
+      setDrawPhase(null);
+      setCurrentRoadPoints([]);
+      setCurrentDividerPoints([]);
+    }
   }, [mode]);
 
   useEffect(() => {
@@ -298,6 +453,20 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   const handleSvgClick = useCallback((e) => {
     if (isDragging.current) { isDragging.current = false; return; }
     const [x, y] = getSvgPoint(e);
+
+    if (drawPhase === "road") {
+      setCurrentRoadPoints(prev => [...prev, [x, y]]);
+      return;
+    }
+    if (drawPhase === "divider") {
+      setCurrentDividerPoints(prev => {
+        if (prev.length === 0) return [snapToPolygonEdge([x, y], roadBoundary)];
+        return [...prev, [x, y]];
+      });
+      return;
+    }
+    if (drawPhase === "assign") return;
+
     if (mode === "draw") {
       setCurrentPoints(prev => [...prev, [x, y]]);
     } else if (mode === "select" || mode === "edit") {
@@ -310,7 +479,7 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
       });
       setSelectedId(clicked ? clicked.id : null);
     }
-  }, [mode, zones, getSvgPoint]);
+  }, [mode, zones, getSvgPoint, drawPhase, roadBoundary]);
 
   const handleSvgMouseMove = useCallback((e) => {
     if (dragPointIdx === null || dragZoneId === null) return;
@@ -340,6 +509,70 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
     setSelectedId(newId);
     setMode("select");
   }, [currentPoints, zones, drawType, drawSubtype, pushHistory]);
+
+  const completeRoadBoundary = useCallback(() => {
+    if (currentRoadPoints.length < 4) return;
+    setRoadBoundary([...currentRoadPoints]);
+    setCurrentRoadPoints([]);
+    setGeneratedSections([]);
+    setDrawPhase("divider");
+  }, [currentRoadPoints]);
+
+  const completeDivider = useCallback(() => {
+    if (currentDividerPoints.length < 2) return;
+    const pts = [...currentDividerPoints];
+    pts[pts.length - 1] = snapToPolygonEdge(pts[pts.length - 1], roadBoundary);
+    setLaneDividers(prev => [...prev, pts]);
+    setCurrentDividerPoints([]);
+    setGeneratedSections([]);
+  }, [currentDividerPoints, roadBoundary]);
+
+  const removeDivider = useCallback((idx) => {
+    setLaneDividers(prev => prev.filter((_, i) => i !== idx));
+    setGeneratedSections([]);
+  }, []);
+
+  const handleGenerateSections = useCallback(() => {
+    if (!roadBoundary.length) return;
+    const sections = splitRoadIntoSections(roadBoundary, laneDividers);
+    setGeneratedSections(sections);
+    setDrawPhase("assign");
+    setCurrentDividerPoints([]);
+  }, [roadBoundary, laneDividers]);
+
+  const assignSection = useCallback((idx) => {
+    const sectionPoly = generatedSections[idx];
+    if (!sectionPoly) return;
+    const newId = zones.length ? Math.max(...zones.map(z => z.id)) + 1 : 1;
+    const newLane = {
+      id: newId, type: "lane", subtype: "traffic_lane",
+      name: `Lane ${newId}`, direction: "unknown",
+      points: sectionPoly,
+      leftLineType: "solid", rightLineType: "solid", lineColor: "white",
+      speedLimit: 0, allowsOvertaking: true, purpose: "general",
+      allowedVehicles: "all", notes: "",
+    };
+    pushHistory([...zones, newLane]);
+    setSelectedId(newId);
+    const remaining = generatedSections.filter((_, i) => i !== idx);
+    setGeneratedSections(remaining);
+    if (remaining.length === 0) {
+      setDrawPhase(null);
+      setRoadBoundary([]);
+      setLaneDividers([]);
+      setMode("select");
+    }
+  }, [generatedSections, zones, pushHistory]);
+
+  const clearRoadState = useCallback(() => {
+    setDrawPhase(null);
+    setRoadBoundary([]);
+    setLaneDividers([]);
+    setGeneratedSections([]);
+    setCurrentRoadPoints([]);
+    setCurrentDividerPoints([]);
+    setHoveredSection(null);
+  }, []);
 
   const deleteZone = useCallback(() => {
     if (selectedId === null) return;
@@ -576,7 +809,7 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
           ))}
         </Glass>
 
-        {/* Zone Type / Subtype (draw mode) */}
+        {/* Draw mode controls */}
         {mode === "draw" && (
           <Glass style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             <div>
@@ -585,30 +818,126 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
                 setDrawType(e.target.value);
                 const zt = ZONE_TYPES.find(z => z.value === e.target.value);
                 setDrawSubtype(zt?.subtypes?.[0] || e.target.value);
+                if (e.target.value !== "lane") clearRoadState();
               }}>
                 {ZONE_TYPES.map(z => <option key={z.value} value={z.value}>{z.label}</option>)}
               </select>
             </div>
-            {curZt?.subtypes?.length > 0 && (
-              <div>
-                <div style={labelSt}>Subtype</div>
-                <select style={selectStyle} value={drawSubtype} onChange={e => setDrawSubtype(e.target.value)}>
-                  {curZt.subtypes.map(s => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
-                </select>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button style={{ ...btn(false), opacity: currentPoints.length < 3 ? 0.4 : 1 }}
-                disabled={currentPoints.length < 3} onClick={completeDrawing}>Complete</button>
-              <button style={{ ...btn(false), opacity: !currentPoints.length ? 0.4 : 1 }}
-                disabled={!currentPoints.length} onClick={() => setCurrentPoints(p => p.slice(0, -1))}>Undo Point</button>
-              <button style={{ ...btn(false), opacity: !currentPoints.length ? 0.4 : 1 }}
-                disabled={!currentPoints.length} onClick={() => setCurrentPoints([])}>Cancel</button>
-            </div>
-            {currentPoints.length > 0 && (
-              <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
-                {currentPoints.length} point{currentPoints.length !== 1 ? "s" : ""} placed
-              </div>
+
+            {drawType === "lane" ? (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 600, color: t.tx || "#fff", borderBottom: `1px solid ${t.dv || "rgba(255,255,255,0.06)"}`, paddingBottom: 6 }}>
+                  Lane Drawing
+                </div>
+
+                {/* Step 1: Road Boundary */}
+                <div style={{ fontSize: 11, fontWeight: drawPhase === "road" ? 600 : 400, color: drawPhase === "road" ? (t.tx || "#fff") : roadBoundary.length ? "#4caf50" : (t.tM || "rgba(255,255,255,0.4)") }}>
+                  1. Road Boundary {roadBoundary.length > 0 && drawPhase !== "road" ? `(${roadBoundary.length} pts)` : ""}
+                </div>
+                {drawPhase === "road" && (
+                  <>
+                    <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
+                      {currentRoadPoints.length} point{currentRoadPoints.length !== 1 ? "s" : ""} -- click to place vertices (min 4)
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button style={{ ...btn(false), opacity: currentRoadPoints.length < 4 ? 0.4 : 1 }}
+                        disabled={currentRoadPoints.length < 4} onClick={completeRoadBoundary}>Complete Road</button>
+                      <button style={{ ...btn(false), opacity: !currentRoadPoints.length ? 0.4 : 1 }}
+                        disabled={!currentRoadPoints.length} onClick={() => setCurrentRoadPoints(p => p.slice(0, -1))}>Undo Point</button>
+                      <button style={btn(false)} onClick={() => { setDrawPhase(null); setCurrentRoadPoints([]); }}>Cancel</button>
+                    </div>
+                  </>
+                )}
+                {!drawPhase && !roadBoundary.length && (
+                  <button style={btn(false)} onClick={() => setDrawPhase("road")}>Draw Road Boundary</button>
+                )}
+
+                {/* Step 2: Dividers */}
+                {roadBoundary.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 11, fontWeight: drawPhase === "divider" ? 600 : 400, color: drawPhase === "divider" ? (t.tx || "#fff") : laneDividers.length ? "#4caf50" : (t.tM || "rgba(255,255,255,0.4)") }}>
+                      2. Lane Dividers ({laneDividers.length})
+                    </div>
+                    {drawPhase === "divider" && (
+                      <>
+                        <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
+                          {currentDividerPoints.length} point{currentDividerPoints.length !== 1 ? "s" : ""} -- endpoints snap to road edge
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button style={{ ...btn(false), opacity: currentDividerPoints.length < 2 ? 0.4 : 1 }}
+                            disabled={currentDividerPoints.length < 2} onClick={completeDivider}>Complete Divider</button>
+                          <button style={{ ...btn(false), opacity: !currentDividerPoints.length ? 0.4 : 1 }}
+                            disabled={!currentDividerPoints.length} onClick={() => setCurrentDividerPoints(p => p.slice(0, -1))}>Undo Point</button>
+                        </div>
+                        {laneDividers.length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            {laneDividers.map((_, i) => (
+                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
+                                <div style={{ width: 8, height: 8, borderRadius: "50%", background: SECTION_STROKES[i % SECTION_STROKES.length], flexShrink: 0 }} />
+                                Divider {i + 1}
+                                <button style={{ ...btnSm(false), padding: "1px 6px", fontSize: 10, marginLeft: "auto" }} onClick={() => removeDivider(i)}>x</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {drawPhase !== "road" && drawPhase !== "divider" && drawPhase !== "assign" && (
+                      <button style={btn(false)} onClick={() => setDrawPhase("divider")}>Add Divider</button>
+                    )}
+                  </>
+                )}
+
+                {/* Step 3: Generate */}
+                {roadBoundary.length > 0 && drawPhase !== "road" && drawPhase !== "assign" && (
+                  <>
+                    <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>3. Generate</div>
+                    <button style={btn(false)} onClick={handleGenerateSections}>Generate Lanes</button>
+                  </>
+                )}
+
+                {/* Step 4: Assign */}
+                {drawPhase === "assign" && (
+                  <>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: t.tx || "#fff" }}>
+                      4. Assign Lanes ({generatedSections.length} remaining)
+                    </div>
+                    <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
+                      Click each section on the canvas to assign it as a lane
+                    </div>
+                    <button style={btn(false)} onClick={clearRoadState}>Done</button>
+                  </>
+                )}
+
+                {/* Clear */}
+                {(roadBoundary.length > 0 || drawPhase) && drawPhase !== "assign" && (
+                  <button style={{ ...btnSm(false), marginTop: 4 }} onClick={clearRoadState}>Clear Road</button>
+                )}
+              </>
+            ) : (
+              <>
+                {curZt?.subtypes?.length > 0 && (
+                  <div>
+                    <div style={labelSt}>Subtype</div>
+                    <select style={selectStyle} value={drawSubtype} onChange={e => setDrawSubtype(e.target.value)}>
+                      {curZt.subtypes.map(s => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button style={{ ...btn(false), opacity: currentPoints.length < 3 ? 0.4 : 1 }}
+                    disabled={currentPoints.length < 3} onClick={completeDrawing}>Complete</button>
+                  <button style={{ ...btn(false), opacity: !currentPoints.length ? 0.4 : 1 }}
+                    disabled={!currentPoints.length} onClick={() => setCurrentPoints(p => p.slice(0, -1))}>Undo Point</button>
+                  <button style={{ ...btn(false), opacity: !currentPoints.length ? 0.4 : 1 }}
+                    disabled={!currentPoints.length} onClick={() => setCurrentPoints([])}>Cancel</button>
+                </div>
+                {currentPoints.length > 0 && (
+                  <div style={{ fontSize: 11, color: t.tM || "rgba(255,255,255,0.4)" }}>
+                    {currentPoints.length} point{currentPoints.length !== 1 ? "s" : ""} placed
+                  </div>
+                )}
+              </>
             )}
           </Glass>
         )}
@@ -679,10 +1008,10 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
           <div style={{ fontSize: 14, fontWeight: 600, color: t.tx || "#fff" }}>{camera || "No Camera"}</div>
           <div style={{
             fontSize: 11, padding: "3px 10px", borderRadius: 12, fontWeight: 500,
-            background: mode === "draw" ? "rgba(255,100,100,0.15)" : mode === "edit" ? "rgba(100,200,255,0.15)" : "rgba(100,255,100,0.1)",
-            color: mode === "draw" ? "#f88" : mode === "edit" ? "#8cf" : "#8f8",
+            background: drawPhase ? "rgba(255,165,0,0.15)" : mode === "draw" ? "rgba(255,100,100,0.15)" : mode === "edit" ? "rgba(100,200,255,0.15)" : "rgba(100,255,100,0.1)",
+            color: drawPhase ? "#fa8" : mode === "draw" ? "#f88" : mode === "edit" ? "#8cf" : "#8f8",
           }}>
-            {mode === "select" ? "Select Mode" : mode === "draw" ? "Draw Mode" : "Edit Points"}
+            {drawPhase === "road" ? "Draw Road" : drawPhase === "divider" ? "Draw Divider" : drawPhase === "assign" ? "Assign Lanes" : mode === "select" ? "Select Mode" : mode === "draw" ? "Draw Mode" : "Edit Points"}
           </div>
         </div>
         <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 12, overflow: "hidden" }}>
@@ -699,7 +1028,7 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
                 style={{
                   width: "100%", height: "100%",
                   background: "rgba(0,0,0,0.4)", borderRadius: 8,
-                  cursor: mode === "draw" ? "crosshair" : mode === "edit" ? "default" : "pointer",
+                  cursor: (drawPhase === "road" || drawPhase === "divider") ? "crosshair" : drawPhase === "assign" ? "pointer" : mode === "draw" ? "crosshair" : mode === "edit" ? "default" : "pointer",
                 }}
                 onClick={handleSvgClick}
                 onMouseMove={handleSvgMouseMove}
@@ -757,7 +1086,87 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
                   );
                 })}
 
-                {mode === "draw" && currentPoints.length > 0 && (
+                {/* Road boundary overlay */}
+                {roadBoundary.length >= 3 && (
+                  <polygon
+                    points={roadBoundary.map(p => p.join(",")).join(" ")}
+                    fill="rgba(255,255,255,0.04)"
+                    stroke="#ff9800"
+                    strokeWidth={0.003}
+                    strokeDasharray="0.015,0.008"
+                    style={{ pointerEvents: "none" }}
+                  />
+                )}
+
+                {/* Divider polylines */}
+                {laneDividers.map((div, i) => (
+                  <polyline
+                    key={`div-${i}`}
+                    points={div.map(p => p.join(",")).join(" ")}
+                    fill="none"
+                    stroke={SECTION_STROKES[i % SECTION_STROKES.length]}
+                    strokeWidth={0.003}
+                    style={{ pointerEvents: "none" }}
+                  />
+                ))}
+
+                {/* Generated sections (assign phase) */}
+                {drawPhase === "assign" && generatedSections.map((section, idx) => (
+                  <polygon
+                    key={`section-${idx}`}
+                    points={section.map(p => p.join(",")).join(" ")}
+                    fill={hoveredSection === idx ? "rgba(255,255,255,0.35)" : SECTION_PALETTE[idx % SECTION_PALETTE.length]}
+                    stroke={hoveredSection === idx ? "#fff" : SECTION_STROKES[idx % SECTION_STROKES.length]}
+                    strokeWidth={hoveredSection === idx ? 0.004 : 0.002}
+                    style={{ cursor: "pointer", transition: "fill 0.15s" }}
+                    onClick={(e) => { e.stopPropagation(); assignSection(idx); }}
+                    onMouseEnter={() => setHoveredSection(idx)}
+                    onMouseLeave={() => setHoveredSection(null)}
+                  />
+                ))}
+
+                {/* In-progress road boundary drawing */}
+                {drawPhase === "road" && currentRoadPoints.length > 0 && (
+                  <g>
+                    {currentRoadPoints.length >= 3 && (
+                      <polygon
+                        points={currentRoadPoints.map(p => p.join(",")).join(" ")}
+                        fill="rgba(255,165,0,0.08)"
+                        stroke="none"
+                      />
+                    )}
+                    <polyline
+                      points={currentRoadPoints.map(p => p.join(",")).join(" ")}
+                      fill="none"
+                      stroke="#ff9800"
+                      strokeWidth={0.002}
+                      strokeDasharray="0.008,0.005"
+                    />
+                    {currentRoadPoints.map((p, i) => (
+                      <circle key={i} cx={p[0]} cy={p[1]} r={0.006}
+                        fill="#ff9800" stroke="#fff" strokeWidth={0.0015} />
+                    ))}
+                  </g>
+                )}
+
+                {/* In-progress divider drawing */}
+                {drawPhase === "divider" && currentDividerPoints.length > 0 && (
+                  <g>
+                    <polyline
+                      points={currentDividerPoints.map(p => p.join(",")).join(" ")}
+                      fill="none"
+                      stroke="#2196f3"
+                      strokeWidth={0.003}
+                      strokeDasharray="0.008,0.005"
+                    />
+                    {currentDividerPoints.map((p, i) => (
+                      <circle key={i} cx={p[0]} cy={p[1]} r={0.006}
+                        fill="#2196f3" stroke="#fff" strokeWidth={0.0015} />
+                    ))}
+                  </g>
+                )}
+
+                {mode === "draw" && !drawPhase && currentPoints.length > 0 && (
                   <g>
                     {currentPoints.length >= 3 && (
                       <polygon
