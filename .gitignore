@@ -3,6 +3,7 @@ dist-renderer/
 dist/
 .env
 env.production
+electron/config.production.js
 *.exe
 *.blockmap
 *.yml.bak

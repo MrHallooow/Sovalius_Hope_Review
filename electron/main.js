@@ -10,17 +10,13 @@ const rootDir = isDev
   ? path.join(__dirname, "..")
   : path.dirname(app.getPath("exe"));
 
-const envCandidates = [
-  path.join(__dirname, "..", "env.production"),
-  path.join(rootDir, ".env"),
-  path.join(process.resourcesPath || rootDir, ".env"),
-  path.join(__dirname, "..", ".env"),
-];
-const envPath = envCandidates.find((p) => fs.existsSync(p));
-if (envPath) {
-  require("dotenv").config({ path: envPath });
+if (isDev) {
+  require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 } else {
-  require("dotenv").config();
+  const prodCfg = require("./config.production.js");
+  for (const [k, v] of Object.entries(prodCfg)) {
+    if (!process.env[k]) process.env[k] = v;
+  }
 }
 
 let pool = null;

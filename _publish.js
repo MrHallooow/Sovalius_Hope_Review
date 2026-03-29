@@ -5,14 +5,14 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.6.1";
-const NAME = "v1.6.1";
-const BODY = `- Fix: bake credentials into asar as env.production (dotfiles silently skipped by electron-builder)
-- Guarantees login works on every auto-update without manual file copy`;
+const TAG = "v1.6.2";
+const NAME = "v1.6.2";
+const BODY = `- Fix login: use require() for production config instead of dotenv + asar file reads
+- Eliminates all env file bundling issues permanently`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.6.1.exe",
-  "dist/HOPE-Review-Setup-1.6.1.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.6.2.exe",
+  "dist/HOPE-Review-Setup-1.6.2.exe.blockmap",
   "dist/latest.yml",
 ];
 
