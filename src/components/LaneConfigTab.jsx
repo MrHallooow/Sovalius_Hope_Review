@@ -669,8 +669,8 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
             {mode === "select" ? "Select Mode" : mode === "draw" ? "Draw Mode" : "Edit Points"}
           </div>
         </div>
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, overflow: "hidden" }}>
-          <div style={{ maxWidth: "100%", maxHeight: "100%", aspectRatio: `${calWidth} / ${calHeight}`, position: "relative" }}>
+        <div style={{ flex: "1 1 0", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 12, overflow: "hidden" }}>
+          <div style={{ width: "100%", maxHeight: "100%", aspectRatio: `${calWidth} / ${calHeight}`, position: "relative" }}>
             {loading ? (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: t.tD || "#888", fontSize: 14 }}>
                 Loading&hellip;
@@ -679,7 +679,7 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
               <svg
                 ref={svgRef}
                 viewBox="0 0 1 1"
-                preserveAspectRatio="xMidYMid meet"
+                preserveAspectRatio="none"
                 style={{
                   width: "100%", height: "100%",
                   background: "rgba(0,0,0,0.4)", borderRadius: 8,

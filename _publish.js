@@ -5,15 +5,14 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.5.1";
-const NAME = "v1.5.1";
-const BODY = `- Fix lane drawing canvas cropping: full background frame now visible
-- Canvas fits within available height instead of overflowing and being clipped
-- SVG preserves aspect ratio correctly`;
+const TAG = "v1.5.2";
+const NAME = "v1.5.2";
+const BODY = `- Fix lane drawing canvas sizing: fills available space while respecting height constraint
+- Flex container uses definite height (flex-basis: 0) so maxHeight percentage resolves correctly`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.5.1.exe",
-  "dist/HOPE-Review-Setup-1.5.1.exe.blockmap",
+  "dist/HOPE-Review-Setup-1.5.2.exe",
+  "dist/HOPE-Review-Setup-1.5.2.exe.blockmap",
   "dist/latest.yml",
 ];
 
