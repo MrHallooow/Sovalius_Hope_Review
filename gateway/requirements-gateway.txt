@@ -1,0 +1,18 @@
+# =============================================================================
+# requirements-gateway.txt — pinned runtime subset for the review gateway
+# =============================================================================
+# Matches the ranges the sovalius-dispatch gateway is green against (same
+# system Python 3.11 install). boto3 is deliberately ABSENT: the default
+# local-disk evidence store needs none; install it only when flipping
+# GWREV_EVIDENCE_STORE=s3.
+
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.30.0,<1.0
+pydantic>=2.6,<3.0
+SQLAlchemy>=2.0,<3.0
+alembic>=1.13,<2.0
+bcrypt>=4.2,<6.0
+PyJWT>=2.9,<3.0
+
+# prod Postgres only (dev runs SQLite):
+# psycopg2-binary>=2.9.9,<3.0

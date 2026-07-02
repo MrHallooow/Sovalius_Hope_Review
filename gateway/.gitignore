@@ -1,0 +1,15 @@
+# Dev database + local evidence store (never commit data)
+data/
+
+# Auto-generated dev JWT secret (config/review_gateway_secret.bin) and any
+# other local secret material
+config/
+
+# Local env files
+.env
+.env.*
+
+# Python build/test artefacts
+__pycache__/
+*.pyc
+.pytest_cache/
