@@ -6,12 +6,14 @@ directories:
   output: dist
   buildResources: build
 
+# NOTE: no credential file is packaged anymore. The only runtime config is the
+# gateway URL: bundled default in electron/config.production.js, overridable by
+# the extraResources .env (GATEWAY_URL=... and nothing else).
 files:
   - "electron/**/*"
   - "dist-renderer/**/*"
   - "node_modules/**/*"
   - "package.json"
-  - "env.production"
 
 forceCodeSigning: false
 

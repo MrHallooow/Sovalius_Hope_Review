@@ -376,3 +376,37 @@ def test_blob_route_rejects_bad_tokens_uniformly():
     # And the untampered token still works — the flip test didn't break it.
     ok = client.get(f"/evidence/blob/{good}")
     assert ok.status_code == 200 and ok.content == b"mp4-clip-bytes"
+
+
+# ---------------------------------------------------------------------------
+# GET /camera-lanes — the all-lanes listing behind db:get-all-camera-lanes
+# ---------------------------------------------------------------------------
+def test_all_camera_lanes_requires_auth():
+    r = client.get("/camera-lanes")
+    assert r.status_code == 401
+    assert r.json()["code"] == "unauthorized"
+
+
+def test_all_camera_lanes_legacy_row_shape_and_order():
+    """Rows carry the LEGACY snake_case IPC column names (the renderer's
+    LaneConfigTab reads r.camera_name verbatim) ordered by camera_name; plain
+    bearer auth suffices (reading calibration needs no privilege)."""
+    a = _login("officer")
+    r = client.get("/camera-lanes", headers=_h(a["accessToken"]))
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["ok"] is True
+    rows = j["rows"]
+    names = [x["camera_name"] for x in rows]
+    assert "CAM-AV-07" in names  # seed
+    assert names == sorted(names)
+    row = next(x for x in rows if x["camera_name"] == "CAM-AV-07")
+    assert set(row) == {
+        "camera_name",
+        "lane_data",
+        "calibration_width",
+        "calibration_height",
+        "updated_at",
+    }
+    assert isinstance(row["lane_data"], (dict, list))
+    assert row["calibration_width"] == 1920 and row["calibration_height"] == 1080

@@ -3,6 +3,10 @@ dist-renderer/
 dist/
 .env
 env.production
+# Quarantined pre-gateway credential files (renamed live .env/env.production).
+# These hold REAL production secrets — never commit, rotate + delete when the
+# credential rotation from the incident runbook completes.
+*.DO-NOT-COMMIT
 electron/config.production.js
 *.exe
 *.blockmap

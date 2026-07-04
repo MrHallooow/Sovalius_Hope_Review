@@ -1,2 +1,10 @@
-const _d = "eyJTM19CVUNLRVQiOiJzb3ZhbGl1cy1ob3BlLWV2aWRlbmNlIiwiQVdTX1JFR0lPTiI6InVzLWVhc3QtMSIsIlBHUE9SVCI6IjU0MzIiLCJQR0RBVEFCQVNFIjoic292YWxpdXNob3BlIiwiUEdQQVNTV09SRCI6IkdvaVZZVEtUckl6N3BCOTVXdzRsIiwiQVdTX0FDQ0VTU19LRVlfSUQiOiJBS0lBUkRJT05MVURNU0VDVk1INyIsIkFXU19TRUNSRVRfQUNDRVNTX0tFWSI6IjVGV21ZYUg5cFJOM1RuSE1kNllKYXdPQlhzV1pEWVNERVJyVVlsaHIiLCJQR0hPU1QiOiJzb3ZhbGl1c2hvcGUtZGIuY21qY3MwODhvZHpwLnVzLWVhc3QtMS5yZHMuYW1hem9uYXdzLmNvbSIsIlBHU1NMIjoidHJ1ZSIsIlBHVVNFUiI6InBvc3RncmVzIn0=";
-module.exports = JSON.parse(Buffer.from(_d, "base64").toString("utf8"));
+// Packaged-build defaults. The ONLY thing the desktop app needs to know is
+// where the review gateway lives — database and object-storage credentials
+// are the gateway's concern and never ship inside the app again.
+//
+// Override without rebuilding by placing a `.env` with GATEWAY_URL=... next
+// to the installed app (resources/.env), or by setting the GATEWAY_URL
+// environment variable.
+module.exports = {
+  GATEWAY_URL: "http://127.0.0.1:8090",
+};

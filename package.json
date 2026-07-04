@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
+    "smoke:gateway": "node scripts/smoke_gateway.mjs",
     "package": "vite build && electron-builder --win",
     "package:dir": "vite build && electron-builder --win --dir"
   },
@@ -13,14 +14,8 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
-    "@aws-sdk/client-ec2": "^3.1019.0",
-    "@aws-sdk/client-rds": "^3.1019.0",
-    "@aws-sdk/client-s3": "^3.1018.0",
-    "@aws-sdk/s3-request-presigner": "^3.1018.0",
-    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.0",
     "electron-updater": "^6.6.2",
-    "pg": "^8.13.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

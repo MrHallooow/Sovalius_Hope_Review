@@ -1,6 +1,7 @@
 """Cameras + lane calibration.
 
 GET   /cameras                  (bearer auth)            — main.js db:get-cameras
+GET   /camera-lanes             (bearer auth)            — main.js db:get-all-camera-lanes
 PATCH /cameras/{id}             (canManageCameras+audit) — main.js db:update-camera
 GET   /cameras/{name}/lanes     (bearer auth)            — main.js db:get-camera-lanes
 PUT   /cameras/{name}/lanes     (canManageCameras+audit) — main.js db:save-camera-lanes
@@ -73,6 +74,39 @@ def list_cameras(
 ) -> dict:
     rows = db.query(models.Camera).order_by(models.Camera.id.asc()).all()
     return {"items": [_camera_json(c) for c in rows]}
+
+
+@router.get("/camera-lanes")
+def list_all_camera_lanes(
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Every lane-calibration row — backs main.js db:get-all-camera-lanes.
+
+    Rows keep the legacy SNAKE_CASE column names (camera_name / lane_data /
+    calibration_width / calibration_height / updated_at) because the renderer's
+    LaneConfigTab reads them verbatim off the IPC response; ordered by
+    camera_name like the legacy ``ORDER BY camera_name``. No presign here —
+    the per-camera GET /cameras/{name}/lanes carries the background frame.
+    """
+    rows = (
+        db.query(models.CameraLane)
+        .order_by(models.CameraLane.camera_name.asc())
+        .all()
+    )
+    return {
+        "ok": True,
+        "rows": [
+            {
+                "camera_name": r.camera_name,
+                "lane_data": r.lane_data or {},
+                "calibration_width": r.calibration_width or 0,
+                "calibration_height": r.calibration_height or 0,
+                "updated_at": iso(r.updated_at),
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.patch("/cameras/{camera_id}")

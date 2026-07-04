@@ -1,69 +1,44 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const fs = require("fs");
-const { Pool } = require("pg");
-const bcrypt = require("bcryptjs");
 const { autoUpdater } = require("electron-updater");
+const gateway = require("./gatewayClient.js");
 
 const isDev = !app.isPackaged;
-const rootDir = isDev
-  ? path.join(__dirname, "..")
-  : path.dirname(app.getPath("exe"));
 
+// ── Configuration ──
+// The ONLY config this app needs is the review-gateway URL. All database,
+// object-storage and credential handling lives behind the gateway (FastAPI,
+// port 8090); this process never holds a DB password or an AWS key.
 if (isDev) {
+  // Dev: .env at the repo root — contains GATEWAY_URL and nothing else.
   require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+  // `npm run dev` always brings Vite up on 5173 (wait-on gates electron), and
+  // the dev-server URL is not a secret — default it so the pruned .env stays
+  // gateway-URL-only.
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    process.env.VITE_DEV_SERVER_URL = "http://localhost:5173";
+  }
 } else {
-  const prodCfg = require("./config.production.js");
-  for (const [k, v] of Object.entries(prodCfg)) {
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
-
-let pool = null;
-let s3Client = null;
-
-function getS3Client() {
-  if (s3Client) return s3Client;
-  const region = process.env.AWS_REGION;
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-  if (!region || !accessKeyId || !secretAccessKey) return null;
-  const { S3Client } = require("@aws-sdk/client-s3");
-  s3Client = new S3Client({
-    region,
-    credentials: { accessKeyId, secretAccessKey },
-  });
-  return s3Client;
-}
-
-function extractS3Key(url) {
-  if (!url) return null;
+  // Packaged: optional .env next to the app (electron-builder extraResources)
+  // lets ops point at a different gateway without rebuilding...
   try {
-    const u = new URL(url);
-    return u.pathname.replace(/^\//, "");
+    require("dotenv").config({ path: path.join(process.resourcesPath, ".env") });
   } catch {
-    return null;
+    /* optional */
+  }
+  // ...falling back to the bundled default (gateway URL only — the old
+  // embedded-credential config.production.js is retired).
+  if (!process.env.GATEWAY_URL) {
+    try {
+      const prodCfg = require("./config.production.js");
+      if (prodCfg && prodCfg.GATEWAY_URL) process.env.GATEWAY_URL = prodCfg.GATEWAY_URL;
+    } catch {
+      /* fall through to the client default */
+    }
   }
 }
 
-function createPool() {
-  const useSSL = process.env.PGSSL === "true";
-  const cfg = {
-    host: process.env.PGHOST || "localhost",
-    port: parseInt(process.env.PGPORT || "5432", 10),
-    database: process.env.PGDATABASE || "hope",
-    user: process.env.PGUSER || "postgres",
-    password: process.env.PGPASSWORD || "",
-    max: 5,
-    connectionTimeoutMillis: 10000,
-    ...(useSSL && { ssl: { rejectUnauthorized: false } }),
-  };
-  pool = new Pool(cfg);
-  pool.on("error", (err) => {
-    console.error("Unexpected PostgreSQL pool error", err);
-  });
-  return pool;
-}
+gateway.init(process.env.GATEWAY_URL);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -87,523 +62,162 @@ function createWindow() {
 }
 
 // ── IPC Handlers ──
+// Channel names and response shapes are IDENTICAL to the legacy direct-PG
+// handlers so the renderer (src/) needs zero changes. Every handler now
+// delegates to gatewayClient, which reshapes gateway responses back into the
+// legacy row shapes and maps gateway {code,message,retryable} errors to the
+// {ok:false, error} the renderer reads.
 
 ipcMain.handle("db:test-connection", async () => {
-  try {
-    if (!pool) createPool();
-    const client = await pool.connect();
-    await client.query("SELECT 1");
-    client.release();
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  // The renderer calls this ONCE at mount — before login — and gates every
+  // later read/write on its result. The legacy direct-PG pool needed no auth,
+  // so data loads worked pre-login; the gateway requires a token. Waiting for
+  // the first successful login here reproduces the legacy timing exactly:
+  // the promise resolves the moment tokens exist, then useDbData's initial
+  // violations/cameras/audit fetches run authenticated.
+  await gateway.waitForLogin();
+  return gateway.testConnection();
 });
 
-ipcMain.handle("db:query", async (_event, sql, params) => {
-  try {
-    if (!pool) createPool();
-    const result = await pool.query(sql, params);
-    return { ok: true, rows: result.rows, rowCount: result.rowCount };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+ipcMain.handle("db:query", async () => {
+  // Raw SQL from the renderer is retired with the direct-PG model — the
+  // gateway API is the only data path. (src/ never invoked this channel.)
+  return {
+    ok: false,
+    error: "Raw SQL is disabled: the review app now talks to the gateway API only",
+  };
 });
 
 ipcMain.handle("db:get-violations", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      `SELECT v.*,
-         COALESCE(r.status, 'pending') AS review_status,
-         r.reviewed_by, r.reviewed_at,
-         COALESCE(r.notes, '') AS review_notes,
-         COALESCE(r.pinned, false) AS review_pinned,
-         COALESCE(r.history, '[]'::jsonb) AS review_history
-       FROM violations v
-       LEFT JOIN violation_reviews r ON r.violation_id = v.id
-       ORDER BY v.timestamp DESC`
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getViolations();
 });
 
 ipcMain.handle("db:get-cameras", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM cameras ORDER BY id"
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getCameras();
 });
 
 ipcMain.handle("db:get-audit-log", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM audit_log ORDER BY at DESC"
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getAuditLog();
 });
 
 ipcMain.handle("db:update-violation", async (_event, violationId, fields) => {
-  try {
-    if (!pool) createPool();
-    const status = fields.status || "pending";
-    const reviewedBy = fields.reviewed_by || null;
-    const reviewedAt = fields.reviewed_at || null;
-    const notes = fields.notes || "";
-    const history = fields.history ? JSON.stringify(fields.history) : "[]";
-
-    const { rows } = await pool.query(
-      `INSERT INTO violation_reviews (violation_id, status, reviewed_by, reviewed_at, notes, pinned, history)
-       VALUES ($1, $2, $3, $4, $5, false, $6::jsonb)
-       ON CONFLICT (violation_id)
-       DO UPDATE SET status = $2, reviewed_by = $3, reviewed_at = $4, notes = $5, history = $6::jsonb
-       RETURNING *`,
-      [violationId, status, reviewedBy, reviewedAt, notes, history]
-    );
-    return { ok: true, row: rows[0] };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  // Only status/notes/pinned travel to the gateway. reviewed_by/reviewed_at/
+  // history are SERVER-derived (token user + server clock, history appended
+  // server-side) — client-supplied values are no longer trusted anywhere.
+  return gateway.updateViolationReview(violationId, fields || {});
 });
 
-ipcMain.handle("db:insert-audit", async (_event, entry) => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      `INSERT INTO audit_log (officer, action, violation_id, at, notes)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [entry.officer, entry.action, entry.violationId, entry.at, entry.notes]
-    );
-    return { ok: true, row: rows[0] };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+ipcMain.handle("db:insert-audit", async () => {
+  // Audit rows are written SERVER-SIDE on every review/user/camera mutation
+  // (tamper-evident hash chain). A client-supplied audit row is untrusted by
+  // design, so this legacy channel is an acknowledged no-op — the renderer
+  // fire-and-forgets it right after db:update-violation, which already
+  // produced the authoritative audit row.
+  return { ok: true, row: null };
 });
 
 // ── Services IPC ──
 
 ipcMain.handle("db:get-services", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM services ORDER BY id"
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getServices();
 });
 
 ipcMain.handle("db:update-service", async (_event, id, fields) => {
-  try {
-    if (!pool) createPool();
-    const keys = Object.keys(fields);
-    const sets = keys.map((k, i) => `"${k}" = $${i + 2}`);
-    const vals = [id, ...keys.map((k) => fields[k])];
-    await pool.query(
-      `UPDATE services SET ${sets.join(", ")}, updated_at = NOW() WHERE id = $1`,
-      vals
-    );
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.updateService(id, fields || {});
 });
 
 // ── User Preferences IPC ──
 
-ipcMain.handle("prefs:load", async (_event, userId) => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT preferences, keybinds, theme FROM users WHERE id = $1",
-      [userId]
-    );
-    if (rows.length === 0) return { ok: false, error: "User not found" };
-    return {
-      ok: true,
-      preferences: rows[0].preferences || {},
-      keybinds: rows[0].keybinds || {},
-      theme: rows[0].theme || "dark",
-    };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+ipcMain.handle("prefs:load", async () => {
+  // Target row comes from the bearer token — the legacy client-supplied
+  // userId is ignored (one user can no longer read another's prefs).
+  return gateway.loadPrefs();
 });
 
-ipcMain.handle("prefs:save", async (_event, userId, prefs, keybinds, theme) => {
-  try {
-    if (!pool) createPool();
-    await pool.query(
-      "UPDATE users SET preferences = $1, keybinds = $2, theme = $3 WHERE id = $4",
-      [JSON.stringify(prefs), JSON.stringify(keybinds), theme, userId]
-    );
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+ipcMain.handle("prefs:save", async (_event, _userId, prefs, keybinds, theme) => {
+  return gateway.savePrefs(prefs, keybinds, theme);
 });
 
 // ── Notifications IPC ──
 
 ipcMain.handle("db:get-notifications", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM notifications ORDER BY at DESC LIMIT 50"
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getNotifications();
 });
 
 ipcMain.handle("db:mark-notification-read", async (_event, id) => {
-  try {
-    if (!pool) createPool();
-    await pool.query("UPDATE notifications SET read = true WHERE id = $1", [id]);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.markNotificationRead(id);
 });
 
 ipcMain.handle("db:mark-all-notifications-read", async () => {
-  try {
-    if (!pool) createPool();
-    await pool.query("UPDATE notifications SET read = true WHERE read = false");
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.markAllNotificationsRead();
 });
 
 // ── Camera CRUD IPC ──
 
 ipcMain.handle("db:update-camera", async (_event, id, fields) => {
-  try {
-    if (!pool) createPool();
-    const keys = Object.keys(fields);
-    const sets = keys.map((k, i) => `"${k}" = $${i + 2}`);
-    const vals = [id, ...keys.map((k) => fields[k])];
-    await pool.query(`UPDATE cameras SET ${sets.join(", ")} WHERE id = $1`, vals);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.updateCamera(id, fields || {});
 });
 
 // ── System Status IPC ──
 
 ipcMain.handle("db:get-system-status", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM system_status ORDER BY timestamp DESC LIMIT 1"
-    );
-    return { ok: true, row: rows[0] || null };
-  } catch (err) {
-    return { ok: false, error: err.message, row: null };
-  }
+  return gateway.getSystemStatus();
 });
 
 // ── Analytics IPC ──
 
 ipcMain.handle("db:get-analytics", async () => {
-  try {
-    if (!pool) createPool();
-
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const weekStart = new Date(todayStart);
-    weekStart.setDate(weekStart.getDate() - 7);
-    const monthStart = new Date(todayStart);
-    monthStart.setDate(monthStart.getDate() - 30);
-
-    const countQ = (since) => pool.query(
-      `SELECT
-         count(*) as total,
-         count(*) FILTER (WHERE COALESCE(r.status,'pending')='approved') as approved,
-         count(*) FILTER (WHERE COALESCE(r.status,'pending')='dismissed') as dismissed,
-         count(*) FILTER (WHERE COALESCE(r.status,'pending')='pending') as pending
-       FROM violations v
-       LEFT JOIN violation_reviews r ON r.violation_id = v.id
-       WHERE v.timestamp >= $1`,
-      [since.toISOString()]
-    );
-
-    const [today, week, month] = await Promise.all([
-      countQ(todayStart), countQ(weekStart), countQ(monthStart),
-    ]);
-
-    const typeRes = await pool.query(
-      `SELECT v.violation_type as type, count(*)::int as count
-       FROM violations v GROUP BY v.violation_type ORDER BY count DESC`
-    );
-    const totalAll = typeRes.rows.reduce((s, r) => s + r.count, 0) || 1;
-    const byType = {};
-    typeRes.rows.forEach((r) => { byType[r.type] = Math.round((r.count / totalAll) * 100); });
-
-    const hourlyRes = await pool.query(
-      `SELECT EXTRACT(HOUR FROM v.timestamp)::int as hr, count(*)::int as c
-       FROM violations v WHERE v.timestamp >= $1
-       GROUP BY hr ORDER BY hr`,
-      [todayStart.toISOString()]
-    );
-    const hourly = new Array(24).fill(0);
-    hourlyRes.rows.forEach((r) => { hourly[r.hr] = r.c; });
-
-    const parse = (r) => ({
-      total: parseInt(r.rows[0].total),
-      approved: parseInt(r.rows[0].approved),
-      dismissed: parseInt(r.rows[0].dismissed),
-      pending: parseInt(r.rows[0].pending),
-    });
-
-    return {
-      ok: true,
-      data: {
-        today: parse(today),
-        week: parse(week),
-        month: parse(month),
-        byType,
-        hourly,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.getAnalytics();
 });
 
 // ── Auth IPC Handlers ──
 
 ipcMain.handle("auth:login", async (_event, username, password) => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT * FROM users WHERE username = $1 AND active = true",
-      [username.toLowerCase().trim()]
-    );
-    if (rows.length === 0) {
-      return { ok: false, error: "Invalid username or password" };
-    }
-    const user = rows[0];
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return { ok: false, error: "Invalid username or password" };
-    }
-    await pool.query("UPDATE users SET last_login = NOW() WHERE id = $1", [user.id]);
-    return {
-      ok: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.display_name,
-        role: user.role,
-        privileges: user.privileges,
-        preferences: user.preferences || {},
-        keybinds: user.keybinds || {},
-        theme: user.theme || "dark",
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  // Tokens live in gatewayClient (main-process memory ONLY) — the renderer
+  // receives the legacy {ok, user} shape with no token material.
+  return gateway.login(username, password);
 });
 
 ipcMain.handle("auth:register", async (_event, userData) => {
-  try {
-    if (!pool) createPool();
-    const existing = await pool.query("SELECT id FROM users WHERE username = $1", [
-      userData.username.toLowerCase().trim(),
-    ]);
-    if (existing.rows.length > 0) {
-      return { ok: false, error: "Username already exists" };
-    }
-    const hash = await bcrypt.hash(userData.password, 12);
-    const { rows } = await pool.query(
-      `INSERT INTO users (username, password, display_name, role, privileges)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, username, display_name, role, privileges`,
-      [
-        userData.username.toLowerCase().trim(),
-        hash,
-        userData.displayName,
-        userData.role || "officer",
-        JSON.stringify(userData.privileges || {}),
-      ]
-    );
-    return { ok: true, user: rows[0] };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.register(userData || {});
 });
 
 ipcMain.handle("auth:list-users", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT id, username, display_name, role, privileges, active, created_at, last_login FROM users ORDER BY id"
-    );
-    return { ok: true, users: rows };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.listUsers();
 });
 
 ipcMain.handle("auth:update-user", async (_event, userId, fields) => {
-  try {
-    if (!pool) createPool();
-    const allowed = ["display_name", "role", "privileges", "active"];
-    const keys = Object.keys(fields).filter((k) => allowed.includes(k));
-    if (keys.length === 0) return { ok: false, error: "No valid fields" };
-    const sets = keys.map((k, i) => `"${k}" = $${i + 2}`);
-    const vals = [userId, ...keys.map((k) => k === "privileges" ? JSON.stringify(fields[k]) : fields[k])];
-    await pool.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $1`, vals);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.updateUser(userId, fields || {});
 });
 
 ipcMain.handle("auth:change-password", async (_event, userId, newPassword) => {
-  try {
-    if (!pool) createPool();
-    const hash = await bcrypt.hash(newPassword, 12);
-    await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hash, userId]);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  // Hashing happens IN the gateway (bcrypt server-side); the password only
+  // transits the localhost request body — no client-side bcryptjs anymore.
+  return gateway.changePassword(userId, newPassword);
 });
 
 ipcMain.handle("auth:delete-user", async (_event, userId) => {
-  try {
-    if (!pool) createPool();
-    await pool.query("UPDATE users SET active = false WHERE id = $1", [userId]);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.deleteUser(userId); // soft delete (active=false) server-side
 });
 
-// ── Evidence S3 Pre-signed URLs ──
+// ── Evidence pre-signed URLs (via gateway; no AWS credentials here) ──
 
 ipcMain.handle("evidence:get-urls", async (_event, rawClipUrl, rawScreenshotUrl, rawRawClipUrl) => {
-  try {
-    const client = getS3Client();
-    if (!client) return { ok: false, error: "AWS credentials not configured" };
-    const bucket = process.env.S3_BUCKET;
-    if (!bucket) return { ok: false, error: "S3_BUCKET not configured" };
-
-    const { GetObjectCommand } = require("@aws-sdk/client-s3");
-    const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-    const expiresIn = 3600;
-
-    let clipUrl = null;
-    let rawUrl = null;
-    let screenshotUrl = null;
-
-    const clipKey = extractS3Key(rawClipUrl);
-    if (clipKey) {
-      clipUrl = await getSignedUrl(client,
-        new GetObjectCommand({ Bucket: bucket, Key: clipKey }),
-        { expiresIn }
-      );
-    }
-
-    const rawClipKey = extractS3Key(rawRawClipUrl);
-    if (rawClipKey) {
-      rawUrl = await getSignedUrl(client,
-        new GetObjectCommand({ Bucket: bucket, Key: rawClipKey }),
-        { expiresIn }
-      );
-    }
-
-    const ssKey = extractS3Key(rawScreenshotUrl);
-    if (ssKey) {
-      screenshotUrl = await getSignedUrl(client,
-        new GetObjectCommand({ Bucket: bucket, Key: ssKey }),
-        { expiresIn }
-      );
-    }
-
-    return { ok: true, clipUrl, rawUrl, screenshotUrl };
-  } catch (err) {
-    console.error("[evidence] error:", err.message);
-    return { ok: false, error: err.message };
-  }
+  return gateway.getEvidenceUrls(rawClipUrl, rawScreenshotUrl, rawRawClipUrl);
 });
 
 // ── Camera Lanes ──
 
 ipcMain.handle("db:get-camera-lanes", async (_event, cameraName) => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT lane_data, calibration_width, calibration_height, background_frame_url, background_frame_at FROM camera_lanes WHERE camera_name = $1",
-      [cameraName]
-    );
-    if (rows.length === 0) return { ok: true, data: null };
-    const row = rows[0];
-    if (row.background_frame_url) {
-      try {
-        const s3 = getS3Client();
-        const bucket = process.env.S3_BUCKET;
-        const bgKey = extractS3Key(row.background_frame_url);
-        if (s3 && bucket && bgKey) {
-          const { GetObjectCommand } = require("@aws-sdk/client-s3");
-          const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-          row.background_frame_presigned = await getSignedUrl(
-            s3, new GetObjectCommand({ Bucket: bucket, Key: bgKey }), { expiresIn: 3600 }
-          );
-        }
-      } catch (e) {
-        console.warn("Failed to generate presigned URL for background frame:", e.message);
-      }
-    }
-    return { ok: true, data: row };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.getCameraLanes(cameraName);
 });
 
 ipcMain.handle("db:get-all-camera-lanes", async () => {
-  try {
-    if (!pool) createPool();
-    const { rows } = await pool.query(
-      "SELECT camera_name, lane_data, calibration_width, calibration_height, updated_at FROM camera_lanes ORDER BY camera_name"
-    );
-    return { ok: true, rows };
-  } catch (err) {
-    return { ok: false, error: err.message, rows: [] };
-  }
+  return gateway.getAllCameraLanes();
 });
 
 ipcMain.handle("db:save-camera-lanes", async (_event, cameraName, laneData, calWidth, calHeight) => {
-  try {
-    if (!pool) createPool();
-    await pool.query(
-      `INSERT INTO camera_lanes (camera_name, lane_data, calibration_width, calibration_height, updated_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (camera_name)
-       DO UPDATE SET lane_data = $2, calibration_width = $3, calibration_height = $4, updated_at = NOW()`,
-      [cameraName, JSON.stringify(laneData), calWidth || 0, calHeight || 0]
-    );
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return gateway.saveCameraLanes(cameraName, laneData, calWidth, calHeight);
 });
 
 // ── Auto-updater ──
@@ -766,7 +380,6 @@ ipcMain.handle("updater:get-version", () => {
 // ── App lifecycle ──
 
 app.whenReady().then(async () => {
-  createPool();
   setupAutoUpdater();
 
   if (app.isPackaged) {
@@ -788,6 +401,5 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (pool) pool.end();
   if (process.platform !== "darwin") app.quit();
 });

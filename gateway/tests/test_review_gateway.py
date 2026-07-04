@@ -422,6 +422,11 @@ def test_append_only_guard():
     from gateway import models
     from gateway.db import SessionLocal
 
+    # Self-sufficient: guarantee at least one audit row via the normal append
+    # path (logins are audited server-side), so this test passes even when the
+    # rest of the module is deselected (pytest -k append_only).
+    _login("officer")
+
     db = SessionLocal()
     try:
         row = db.query(models.AuditLog).order_by(models.AuditLog.seq.asc()).first()
