@@ -124,6 +124,46 @@ class PrefsPut(_Permissive):
     theme: str | None = None
 
 
+class RackLocation(_Permissive):
+    """location{lat?,lng?,label?} sub-object on the rack ingestion payload."""
+
+    lat: float | None = None
+    lng: float | None = None
+    label: str | None = None
+
+
+class RackEvidence(_Permissive):
+    """evidence{clipUrl?,rawClipUrl?,screenshotUrl?} — remote (MinIO) URLs,
+    never bytes."""
+
+    clipUrl: str | None = None
+    rawClipUrl: str | None = None
+    screenshotUrl: str | None = None
+
+
+class RackViolationIngest(_Permissive):
+    """POST /violations/from-rack — gateway_api_contract.md "Rack->review
+    violation ingestion". ``id`` is the rack-minted canonical violation_uid;
+    it becomes this gateway's Violation.id VERBATIM. ``citable`` is required
+    per the contract's payload shape, but the router stores an absent value
+    as None honestly rather than 400ing (see rack_ingest.py)."""
+
+    id: str
+    type: str
+    plate: str | None = None
+    speedMph: int | None = None
+    speedLimitMph: int | None = None
+    camera: str | None = None
+    cameras: list[str] | None = None
+    capturedAtUtc: str
+    location: RackLocation | None = None
+    confidence: float | None = None
+    weather: str | None = None
+    citable: bool | None = None
+    gateReason: str | None = None
+    evidence: RackEvidence | None = None
+
+
 class ServicePatch(_Permissive):
     """PATCH /services/{id} — server-side ALLOWLIST (the legacy IPC handler
     interpolated arbitrary client column names into SQL; these five are the

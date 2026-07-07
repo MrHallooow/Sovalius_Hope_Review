@@ -93,6 +93,18 @@ class Settings:
     bridge_secret: str
     bridge_poll_sec: float
     bridge_batch: int
+    # ---- rack->review violation ingestion (gateway_api_contract.md
+    # "Rack->review violation ingestion") ----
+    # Shared secret the on-prem rack's review_push worker presents as
+    # X-Rack-Secret on POST /violations/from-rack (constant-time compared). A
+    # SEPARATE trust domain from officer JWTs AND from the dispatch gateway's
+    # own GATEWAY_RACK_SECRET — this is a review-side secret. Empty disables
+    # nothing by itself (there is no worker to gate) but makes the endpoint
+    # fail-closed-refuse every request — same NEVER-auto-seeded posture as
+    # bridge_secret above: no hardcoded dev default, never written to disk by
+    # this module. Provision GWREV_RACK_SECRET (or the _FILE variant) to
+    # exercise the endpoint locally.
+    rack_ingress_secret: str
 
 
 def _read_secret(file_env: str, value_env: str) -> str:
@@ -147,6 +159,9 @@ def load_settings() -> Settings:
         bridge_secret=os.environ.get("GWREV_BRIDGE_SECRET", ""),
         bridge_poll_sec=float(os.environ.get("GWREV_BRIDGE_POLL_SEC", 5.0)),
         bridge_batch=int(os.environ.get("GWREV_BRIDGE_BATCH", 20)),
+        rack_ingress_secret=_read_secret(
+            "GWREV_RACK_SECRET_FILE", "GWREV_RACK_SECRET"
+        ),
     )
 
 

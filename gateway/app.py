@@ -41,6 +41,7 @@ from .routers import (
     evidence,
     notifications,
     prefs,
+    rack_ingest,
     system,
     users,
     violations,
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
         prefs,
         system,
         decisions,
+        rack_ingest,
     ):
         app.include_router(module.router)
 
