@@ -55,7 +55,11 @@ _BACKOFF_JITTER_FRAC = 0.20
 
 # Non-retryable error codes per gateway_api_contract.md ("Camera citations",
 # "Rules") — these PARK the row rather than scheduling a retry.
-_NON_RETRYABLE_CODES = {"non_citable", "unmapped_offence"}
+# court_only_offence: the dispatch gateway's legally-correct refusal for a
+# type whose offence is court-only (e.g. dangerous/reckless driving) — it can
+# never be a fixed-penalty citation; the row waits, parked, for the future
+# camera->summons path.
+_NON_RETRYABLE_CODES = {"non_citable", "unmapped_offence", "court_only_offence"}
 
 
 def _utcnow() -> datetime:

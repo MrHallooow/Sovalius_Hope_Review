@@ -256,6 +256,32 @@ def test_422_unmapped_offence_also_parks():
         db.close()
 
 
+def test_422_court_only_offence_also_parks():
+    """The dispatch gateway's legally-correct refusal for a court-only offence
+    (e.g. reckless driving — needs the future camera->summons path, can never
+    be a fixed-penalty citation). Must park like the other two non-retryable
+    codes — an unrecognized 422 would retry forever."""
+    db = SessionLocal()
+    try:
+        row = _mk_row(db, suffix="PARK3")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                422,
+                json={"code": "court_only_offence", "message": "court-only", "retryable": False},
+            )
+
+        with _mock_client(handler) as client:
+            bridge_worker.drain_once(db, _ENABLED_CFG, client=client)
+
+        got = _reload(db, row.id)
+        assert got.parked_at is not None
+        assert got.delivered_at is None
+        assert "court_only_offence" in got.last_error
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # duplicate:true 2xx is still treated as success
 # ---------------------------------------------------------------------------
