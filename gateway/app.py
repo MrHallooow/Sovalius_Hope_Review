@@ -9,8 +9,10 @@ gateway directly, add a locked-down allowlist (the app:// origin), never "*".
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +21,7 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import audit as audit_module
+from . import bridge_worker
 from .config import settings
 from .db import SessionLocal, init_db
 from .logging_setup import (
@@ -65,12 +68,36 @@ def _error_body(status: int, message: str) -> dict:
     return {"code": code, "message": message, "retryable": retryable}
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Citation-lifecycle bridge push worker: only started when BOTH
+    # bridge_url and bridge_secret are configured (fail-closed — see
+    # bridge_worker.is_enabled / config.py). Cancelled cleanly on shutdown.
+    task: asyncio.Task | None = None
+    if bridge_worker.is_enabled(settings):
+        task = asyncio.create_task(bridge_worker.run_forever(settings))
+    else:
+        logger.info("bridge_worker: disabled (GWREV_BRIDGE_URL/SECRET unset)")
+    app.state.bridge_worker_task = task
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
 def create_app() -> FastAPI:
     # Structured JSON logging first so every line below (including init) is
     # shaped and correlatable. Reads GWREV_LOG_LEVEL / GWREV_LOG_JSON inside.
     configure_logging()
 
-    app = FastAPI(title="SVG H.O.P.E — Review Gateway", version="0.1.0")
+    app = FastAPI(
+        title="SVG H.O.P.E — Review Gateway", version="0.1.0", lifespan=_lifespan
+    )
 
     # One process-wide login throttle held on app.state (mutable runtime state,
     # test-injectable / resettable) — NOT a module global.

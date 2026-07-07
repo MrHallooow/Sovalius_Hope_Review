@@ -81,6 +81,18 @@ class Settings:
     # Hard cap on a request body size (bytes), enforced from Content-Length in
     # the request middleware -> 413 payload_too_large.
     max_body_bytes: int
+    # ---- citation-lifecycle bridge push worker (decision_outbox -> dispatch
+    # gateway's POST /citations/from-review; see gateway_api_contract.md) ----
+    # Base URL of the DISPATCH gateway (e.g. http://127.0.0.1:8088). Empty
+    # (default) disables the worker entirely — no task is started, nothing is
+    # ever POSTed anywhere by default.
+    bridge_url: str
+    # Shared secret sent as X-Bridge-Secret. Empty disables the worker (same
+    # fail-closed posture as GATEWAY_RACK_SECRET on the dispatch side) — NEVER
+    # hardcoded, never written to disk by this module.
+    bridge_secret: str
+    bridge_poll_sec: float
+    bridge_batch: int
 
 
 def _read_secret(file_env: str, value_env: str) -> str:
@@ -131,6 +143,10 @@ def load_settings() -> Settings:
         s3_secret_key=_read_secret("GWREV_S3_SECRET_KEY_FILE", "GWREV_S3_SECRET_KEY"),
         evidence_url_ttl_sec=int(os.environ.get("GWREV_EVIDENCE_URL_TTL", 3600)),
         max_body_bytes=int(os.environ.get("GWREV_MAX_BODY_BYTES", 1 * 1024 * 1024)),
+        bridge_url=os.environ.get("GWREV_BRIDGE_URL", "").rstrip("/"),
+        bridge_secret=os.environ.get("GWREV_BRIDGE_SECRET", ""),
+        bridge_poll_sec=float(os.environ.get("GWREV_BRIDGE_POLL_SEC", 5.0)),
+        bridge_batch=int(os.environ.get("GWREV_BRIDGE_BATCH", 20)),
     )
 
 

@@ -278,6 +278,18 @@ class DecisionOutbox(Base):
       * ``delivered_at`` stays NULL forever for "dismissed"/"reopened" rows —
         those are provenance/feed-only entries; only an "approved" row is ever
         actually pushed to the dispatch gateway, so only it can be delivered.
+
+    Step 2 (bridge_worker.py) additions — same append-only posture: the
+    worker may only ever SET ``delivered_at``/``attempts``/``last_error``/
+    ``parked_at``/``next_attempt_at`` on an approved row, never ``payload``.
+      * ``parked_at`` NULL = not parked. Set ONLY on a non-retryable delivery
+        outcome (422 non_citable / unmapped_offence per the contract) and is
+        PERMANENT — a parked row is excluded from the worker's query forever;
+        re-delivery is a deliberate manual/ops action, never automatic.
+      * ``next_attempt_at`` NULL = eligible now. Set on every retryable
+        failure to ``now + backoff(attempts)`` (exponential + jitter, see
+        bridge_worker.select_due) so a struggling/duplicate row does not spin
+        the worker's poll loop.
     """
 
     __tablename__ = "decision_outbox"
@@ -299,3 +311,15 @@ class DecisionOutbox(Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str] = mapped_column(Text, default="")
+    # NULL = not parked. Set once, permanently, on a non-retryable (422)
+    # delivery outcome. Parked rows are excluded from the worker's undelivered
+    # query and surface separately as "quarantined" on /system/status.
+    parked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # NULL = due now. Set on a retryable failure to the next eligible retry
+    # time (per-row exponential backoff + jitter); the worker's query only
+    # selects rows where this is NULL or already in the past.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

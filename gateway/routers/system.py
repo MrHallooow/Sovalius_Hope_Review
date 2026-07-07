@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import audit, models
+from ..bridge_worker import outbox_snapshot
 from ..db import get_db
 from ..schemas import ServicePatch
 from ..security import current_user, require_roles
@@ -103,8 +104,14 @@ def system_status(
         )
         .first()
     )
+    # Stuck-outbox metric (citation-lifecycle bridge, gateway_api_contract.md
+    # "Camera citations"): surfaced regardless of whether the push worker is
+    # currently running, so a disabled/misconfigured worker still shows a
+    # growing backlog instead of silently hiding it.
+    outbox = outbox_snapshot(db)
+
     if row is None:
-        return {"ok": True, "row": None}
+        return {"ok": True, "row": None, "outbox": outbox}
     return {
         "ok": True,
         "row": {
@@ -113,4 +120,5 @@ def system_status(
             "status": row.status,
             "detail": row.detail or {},
         },
+        "outbox": outbox,
     }

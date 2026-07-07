@@ -671,7 +671,17 @@ def test_system_status_and_empty_table():
 
         empty = client.get("/system/status", headers=_h(t))
         assert empty.status_code == 200
-        assert empty.json() == {"ok": True, "row": None}
+        body = empty.json()
+        assert body["ok"] is True
+        assert body["row"] is None
+        # outbox block (bridge_worker step 2) is independent of system_status
+        # rows — always present, never breaks the empty-table contract.
+        assert {
+            "undelivered",
+            "quarantined",
+            "oldest_undelivered_age_sec",
+            "last_error",
+        } <= set(body["outbox"])
 
         for status, detail, ts in saved:
             db.add(models.SystemStatus(status=status, detail=detail, timestamp=ts))
