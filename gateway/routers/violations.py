@@ -12,7 +12,10 @@ PATCH /violations/{id}/review      -> per-transition privilege checks; the
                                       APPENDS to history — client-supplied
                                       reviewed_by/reviewed_at/history are
                                       ignored. Every change writes a
-                                      tamper-evident audit row.
+                                      tamper-evident audit row. A STATUS
+                                      change additionally appends a
+                                      DecisionOutbox row in the SAME
+                                      transaction (see below).
 GET   /violations/{id}/history     -> {ok, violationId, history} — full
                                       provenance: the violation's own history
                                       (e.g. the AI "flagged" entry) followed by
@@ -25,6 +28,15 @@ r.reviewed_at overwrote the violation's own columns in the returned row, so
 violation is unreviewed) — matching what the renderer actually received.
 main.js also ordered by ``v.timestamp`` / selected ``v.violation_type``, which
 do not exist in schema.sql (date/type do) — the task contract pins date/type.
+
+Citation-lifecycle bridge (gateway_api_contract.md "Camera citations — the
+review->service bridge"): every ACTUAL status change (pending<->approved,
+pending<->dismissed, approved<->dismissed and back) appends one
+``models.DecisionOutbox`` row alongside the ``ViolationReview`` write and the
+``AuditLog`` row, all in ``db.commit()`` — one transaction, all-or-nothing. A
+note-only or pinned-only PATCH is not a decision and writes no outbox row.
+See ``models.DecisionOutbox`` for the full append-only / same-txn / event-id
+contract; this router owns the ONLY write path into that table.
 """
 
 from __future__ import annotations
@@ -81,6 +93,59 @@ def _violation_row(v: models.Violation, r: models.ViolationReview | None) -> dic
         "review_notes": (r.notes if r is not None else None) or "",
         "review_pinned": bool(r.pinned) if r is not None else False,
         "review_history": (r.history if r is not None else None) or [],
+    }
+
+
+def _outbox_decision(from_status: str, to_status: str) -> str:
+    """Map a validated (from, to) status transition to the outbox's
+    ``decision`` vocabulary. Any transition BACK to pending is "reopened"
+    regardless of which decided state it came from."""
+    if to_status == "pending":
+        return "reopened"
+    return to_status  # "approved" | "dismissed"
+
+
+def _outbox_payload(
+    v: models.Violation,
+    *,
+    decision: str,
+    reviewed_by: str,
+    reviewed_at,
+    review_notes: str,
+) -> dict:
+    """Assemble the camelCase event snapshot handed to the future push worker
+    / decision feed verbatim — shape matches gateway_api_contract.md's
+    ``POST /citations/from-review`` body (``violation`` sub-object)."""
+    evidence = []
+    for kind, url in (
+        ("clip", v.clip_url),
+        ("raw_clip", v.raw_clip_url),
+        ("screenshot", v.screenshot_url),
+    ):
+        if url:
+            evidence.append({"kind": kind, "url": url})
+    return {
+        "violationId": v.id,
+        "decision": decision,
+        "reviewedBy": reviewed_by,
+        "reviewedAtUtc": iso(reviewed_at),
+        "reviewNotes": review_notes,
+        "violation": {
+            "plate": v.plate or "",
+            "type": v.type,
+            "speedMph": v.speed,
+            "speedLimitMph": v.speed_limit,
+            "camera": v.camera or "",
+            "capturedAtUtc": iso(v.date),
+            "location": {
+                "lat": v.gps_lat,
+                "lng": v.gps_lng,
+                "label": v.location or "",
+            },
+            "citable": v.citable,
+            "gateReason": v.gate_reason or "",
+            "evidence": evidence,
+        },
     }
 
 
@@ -275,5 +340,26 @@ def patch_review(
             "notesChanged": notes_changed,
         },
     )
+
+    # ---- citation-lifecycle bridge: one outbox row per ACTUAL status change,
+    # same transaction as the review + audit writes above (all-or-nothing on
+    # the commit below). Note-only / pinned-only PATCHes never reach here. ----
+    if status_changed:
+        decision = _outbox_decision(current, new_status)
+        db.add(
+            models.DecisionOutbox(
+                violation_id=violation_id,
+                decision=decision,
+                payload=_outbox_payload(
+                    v,
+                    decision=decision,
+                    reviewed_by=actor,
+                    reviewed_at=now,
+                    review_notes=review.notes or "",
+                ),
+                created_at=now,
+            )
+        )
+
     db.commit()
     return {"ok": True, "row": _review_row(review), "changed": True}

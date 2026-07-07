@@ -225,6 +225,12 @@ def _seed_violations(db: Session) -> None:
                     weather=weather,
                     ai_summary=summary,
                     status="pending",
+                    # Rack enforcement-gate verdict. Real data isn't wired yet
+                    # (the rack sync is future work) — dev seed data sets this
+                    # True so the citation-lifecycle bridge's happy path
+                    # (outbox -> future push worker) is testable end-to-end.
+                    citable=True,
+                    gate_reason="gate: citation class, certified basis",
                     history=[
                         {
                             "action": "flagged",

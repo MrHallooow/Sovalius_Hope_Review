@@ -123,6 +123,14 @@ class Violation(Base):
     clip_url: Mapped[str] = mapped_column(Text, default="")
     raw_clip_url: Mapped[str] = mapped_column(Text, default="")
     screenshot_url: Mapped[str] = mapped_column(Text, default="")
+    # Rack enforcement-gate verdict (citation-lifecycle bridge, see
+    # DecisionOutbox below). NULL/unset until the rack sync populates it —
+    # nothing writes these two columns yet except dev seed data. `citable`
+    # gates whether an approved decision may ever become a citation
+    # (gateway_api_contract.md "Camera citations"); `gate_reason` is the
+    # human-readable basis (e.g. "gate: citation class, certified basis").
+    citable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    gate_reason: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
 
 
 class ViolationReview(Base):
@@ -236,3 +244,58 @@ class SystemStatus(Base):
     )
     status: Mapped[str] = mapped_column(String(32), default="ok")
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DecisionOutbox(Base):
+    """Transactional outbox — step 1 of the citation-lifecycle bridge (see
+    gateway_api_contract.md, "Camera citations — the review->service bridge").
+
+    Semantics (do not weaken these when this table grows a consumer):
+      * APPEND-ONLY. A row is written once, by ``routers.violations.patch_review``,
+        and never mutated by this codebase. The future push worker only ever
+        SETs ``delivered_at``/``attempts``/``last_error`` on an *approved* row —
+        it never edits ``payload``.
+      * SAME-TRANSACTION-AS-DECISION. The outbox row is added to the SAME
+        SQLAlchemy session/commit that writes the ``ViolationReview`` row and
+        the ``AuditLog`` row for that review change (see audit.record's own
+        stage-don't-commit contract). If the commit fails, NONE of the three
+        rows persist — that is what makes the outbox a reliable source for the
+        future push worker (no decision is ever "recorded" without its outbox
+        entry, and no outbox entry exists without a real recorded decision).
+      * ``id`` IS THE BRIDGE EVENT ID. This monotonic autoincrement integer is
+        ``sourceEventId`` end-to-end: the push worker's idempotency key into
+        the OTHER gateway's ``POST /citations/from-review``, the review
+        gateway's own ``/decisions/feed?since=<eventId>`` cursor, and the
+        reconciliation join key. Never re-derive or re-mint an event id
+        elsewhere.
+      * ONE ROW PER TRANSITION. Every actual STATUS change (pending<->approved,
+        pending<->dismissed, approved<->dismissed, and back) appends exactly
+        one new row — re-deciding a violation multiple times produces multiple
+        outbox rows, each independently delivered/reconciled. A note-only or
+        pinned-only PATCH is not a decision and writes no row.
+      * ``decision`` is "approved" | "dismissed" | "reopened" — "reopened"
+        covers any transition BACK to pending from a decided state.
+      * ``delivered_at`` stays NULL forever for "dismissed"/"reopened" rows —
+        those are provenance/feed-only entries; only an "approved" row is ever
+        actually pushed to the dispatch gateway, so only it can be delivered.
+    """
+
+    __tablename__ = "decision_outbox"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    violation_id: Mapped[str] = mapped_column(String(64), index=True)
+    # approved | dismissed | reopened
+    decision: Mapped[str] = mapped_column(String(16))
+    # Full event snapshot handed to the push worker / decision feed verbatim —
+    # see routers.violations for the exact camelCase shape (matches the
+    # gateway_api_contract.md POST /citations/from-review body).
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    # NULL = undelivered. Only ever set for "approved" rows, only ever by the
+    # future push worker (never by this router).
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(Text, default="")
