@@ -37,6 +37,7 @@ from .routers import (
     audit,
     auth,
     cameras,
+    decisions,
     evidence,
     notifications,
     prefs,
@@ -135,6 +136,7 @@ def create_app() -> FastAPI:
         users,
         prefs,
         system,
+        decisions,
     ):
         app.include_router(module.router)
 
