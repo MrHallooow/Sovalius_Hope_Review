@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { useDbData } from "./services/useDbData.js";
-import { getEvidenceUrls } from "./services/dbApi.js";
+import { getEvidenceUrls, fetchTracksJson } from "./services/dbApi.js";
+import { parseTracksSidecar, findFrameAtTime, computeContentBox, scaleBBoxToBox, trackLabel } from "./services/overlayMath.mjs";
 import LaneConfigTab from "./components/LaneConfigTab.jsx";
 
 const SovMark=({size=20,color="#000"})=><svg width={size} height={size*.84} viewBox="1190 690 620 520" style={{flexShrink:0,display:"block"}}><g transform="translate(1313,909)"><path d="M0 0 C13.7 5 81.5 34.2 125.1 55.3 C232.9 107.5 349.5 164 413.6 195.1 C428.5 202.2 448.2 211.7 466 221 C458.7 223.6 439 226.1 407.1 230 C350.5 237 268.4 247.3 182.6 257.9 C113.4 266.5 37.1 276 -24.1 283.6 C-60.9 288.2 -84.5 291.2 -109 293 C-110.7 283 -113.7 265.5 -115 251 C-103.1 247.7 -85.1 244.3 -52.6 238 C-32 234.1 8.3 226.3 134.5 201.8 C155.2 197.8 193.6 190.3 248.3 179.6 C261.8 177 268 177 268 175 C262.8 174 254.4 170 241.6 163.7 C200.8 144.6 123.7 108.4 62.1 79.6 C28.9 63.9 -20.7 40.7 -58 23 C-53.6 19.1 -36.1 9.8 -17.9 0.1 C-11 -3.4 0 0 0 0 Z" fill={color}/></g><g transform="translate(1698,703)"><path d="M0 0 C-2.2 8 -8.8 22.2 -24.8 57.6 C-42.7 97.4 -58.6 132.6 -84.2 189.6 C-112.4 252.4 -120.4 270.3 -127 285 C-136.3 282.2 -156.9 272.6 -177 263 C-167 236.9 -159.2 217.1 -122 124 C-143 134.3 -203.5 163 -263.4 191.4 C-295.9 206.8 -309.3 213.4 -320 214 C-325.1 211.9 -340.9 204.3 -369 191 C-364 186.8 -350.5 179.9 -324.9 166.7 C-302.6 155.2 -248 127 -200.4 102.4 C-171.2 87.4 -142.8 72.6 -109.4 55.4 C-79.1 39.8 -50.3 24.9 -18.8 8.6 C-10.4 4.3 -2.1 0 0 0 Z" fill={color}/></g></svg>;
@@ -290,6 +291,77 @@ function TimeoutWarning({left,onDismiss}){
   </div>);
 }
 
+/* ═══ TRACK OVERLAY (canvas bbox player, Phase 3 CPU-erasure) ═══ */
+function TrackOverlay({videoRef:vR,tracksData:td,active}){
+  const cvRef=useRef(null);
+  useEffect(()=>{
+    const video=vR.current,canvas=cvRef.current;
+    if(!video||!canvas)return;
+    let cancelled=false,rafId=null,rvfcId=null;
+    const ctx=canvas.getContext("2d");
+    const draw=()=>{
+      if(cancelled)return;
+      const dpr=window.devicePixelRatio||1;
+      const w=video.clientWidth,h=video.clientHeight;
+      const pw=Math.max(1,Math.round(w*dpr)),ph=Math.max(1,Math.round(h*dpr));
+      if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,w,h);
+      if(!active||!td||!video.videoWidth||!video.videoHeight)return;
+      const frame=findFrameAtTime(td.frames,td.clip_start_pts_ns,video.currentTime);
+      if(!frame||!frame.tracks)return;
+      const box=computeContentBox(w,h,video.videoWidth,video.videoHeight);
+      for(const tr of frame.tracks){
+        if(!tr.bbox||tr.bbox.length!==4)continue;
+        const isV=td.violation_track_id!=null&&tr.id===td.violation_track_id;
+        const[x1,y1,x2,y2]=scaleBBoxToBox(tr.bbox,td.ai_resolution,box);
+        ctx.lineWidth=isV?3:1.5;
+        ctx.strokeStyle=isV?"#f87171":"#34d399";
+        ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+        const label=trackLabel(tr);
+        if(label){
+          ctx.font="600 11px 'JetBrains Mono',monospace";
+          const tw=ctx.measureText(label).width;
+          const lx=Math.max(0,x1),ly=Math.max(13,y1);
+          ctx.fillStyle=isV?"rgba(248,113,113,.9)":"rgba(52,211,153,.9)";
+          ctx.fillRect(lx,ly-13,tw+8,15);
+          ctx.fillStyle="#0a0f0c";
+          ctx.fillText(label,lx+4,ly-2);
+        }
+      }
+    };
+    const loop=()=>{
+      if(cancelled)return;
+      draw();
+      if(typeof video.requestVideoFrameCallback==="function"){
+        rvfcId=video.requestVideoFrameCallback(loop);
+      }else if(!video.paused){
+        rafId=requestAnimationFrame(loop);
+      }
+    };
+    const onPlay=()=>{if(typeof video.requestVideoFrameCallback!=="function")loop();};
+    let ro=null;
+    video.addEventListener("play",onPlay);
+    video.addEventListener("seeked",draw);
+    video.addEventListener("pause",draw);
+    video.addEventListener("loadedmetadata",draw);
+    if(typeof ResizeObserver!=="undefined"){ro=new ResizeObserver(draw);ro.observe(video);}
+    else window.addEventListener("resize",draw);
+    loop();
+    return()=>{
+      cancelled=true;
+      video.removeEventListener("play",onPlay);
+      video.removeEventListener("seeked",draw);
+      video.removeEventListener("pause",draw);
+      video.removeEventListener("loadedmetadata",draw);
+      if(ro)ro.disconnect();else window.removeEventListener("resize",draw);
+      if(rafId)cancelAnimationFrame(rafId);
+      if(rvfcId&&typeof video.cancelVideoFrameCallback==="function")video.cancelVideoFrameCallback(rvfcId);
+    };
+  },[vR,td,active]);
+  return(<canvas ref={cvRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:1}}/>);
+}
+
 /* ═══ VIDEO PLAYER ═══ */
 function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying:sPl,showAI:ai,setShowAI:sAi,onPrev:oP,onNext:oN,showNav:sN=false}){
   const st=useContext(StC),c=useContext(CC);
@@ -301,21 +373,39 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
   const[ssUrl,sSsUrl]=useState(null);
   const[vidErr,sVidErr]=useState(false);
   const[imgErr,sImgErr]=useState(false);
+  const[tracksData,sTracksData]=useState(null);
+  const[tracksChecked,sTracksChecked]=useState(false);
+  const[overlayOn,sOverlayOn]=useState(true);
   const vidRef=useRef(null);
   const vis=useAH(pl,st.autoHideDelay||3);
   const fade={opacity:vis?1:0,transition:"opacity .4s",pointerEvents:vis?"auto":"none"};
   const hasRemote=!!(v&&(v.remoteClipUrl||v.remoteScreenshotUrl));
-  const clipUrl=ai?annotatedUrl:(rawUrl||annotatedUrl);
+  // The rack is retiring burned-in annotated clips: NEW evidence only ships
+  // clip_raw.mp4 (+ tracks.json). If there's no annotated clip, "AI" mode
+  // falls back to raw rather than showing nothing — the AI/RAW toggle still
+  // works for OLD evidence that has both.
+  const effectiveAi=ai&&!!annotatedUrl;
+  const clipUrl=effectiveAi?annotatedUrl:(rawUrl||annotatedUrl);
+  const isRawPlayback=!!clipUrl&&clipUrl===rawUrl;
 
   useEffect(()=>{
     let cancelled=false;
     sAnnotatedUrl(null);sRawUrl(null);sSsUrl(null);sVidErr(false);sImgErr(false);sProg(0);sDur(0);
+    sTracksData(null);sTracksChecked(false);sOverlayOn(true);
     if(!v||!hasRemote){return;}
     getEvidenceUrls(v.remoteClipUrl,v.remoteScreenshotUrl,v.remoteRawClipUrl).then(res=>{
       if(cancelled||!res||!res.ok)return;
       if(res.clipUrl)sAnnotatedUrl(res.clipUrl);
       if(res.rawUrl)sRawUrl(res.rawUrl);
       if(res.screenshotUrl)sSsUrl(res.screenshotUrl);
+      if(!res.tracksUrl){sTracksChecked(true);return;}
+      fetchTracksJson(res.tracksUrl).then(raw=>{
+        if(cancelled)return;
+        const parsed=parseTracksSidecar(raw);
+        sTracksData(parsed);
+        sTracksChecked(true);
+        if(parsed)sOverlayOn(true); // default ON whenever a sidecar loads
+      });
     }).catch(()=>{});
     return()=>{cancelled=true;};
   },[v?.id]);
@@ -369,7 +459,8 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
           <span style={{fontSize:12,color:"rgba(255,255,255,.3)",fontFamily:"'JetBrains Mono',monospace"}}>{(vidErr||imgErr)?"Failed to load evidence":"No evidence available"}</span>
         </div>
       )}
-      {v&&clipUrl&&!vidErr&&<div style={{position:"absolute",top:10,left:12,pointerEvents:"none",display:"flex",gap:6,alignItems:"center"}}><span style={{fontSize:9,color:ai?"rgba(167,139,250,.7)":"rgba(52,211,153,.7)",fontFamily:"'JetBrains Mono',monospace",background:"rgba(0,0,0,.5)",padding:"3px 8px",borderRadius:5}}>{ai?"AI ANNOTATED":"RAW FOOTAGE"}</span></div>}
+      {clipUrl&&!vidErr&&isRawPlayback&&overlayOn&&tracksData&&<TrackOverlay videoRef={vidRef} tracksData={tracksData} active={true}/>}
+      {v&&clipUrl&&!vidErr&&<div style={{position:"absolute",top:10,left:12,pointerEvents:"none",display:"flex",gap:6,alignItems:"center"}}><span style={{fontSize:9,color:effectiveAi?"rgba(167,139,250,.7)":"rgba(52,211,153,.7)",fontFamily:"'JetBrains Mono',monospace",background:"rgba(0,0,0,.5)",padding:"3px 8px",borderRadius:5}}>{effectiveAi?"AI ANNOTATED":"RAW FOOTAGE"}</span>{isRawPlayback&&tracksChecked&&!tracksData&&<span style={{fontSize:9,color:"rgba(255,255,255,.4)",fontFamily:"'JetBrains Mono',monospace",background:"rgba(0,0,0,.5)",padding:"3px 8px",borderRadius:5}}>no overlay data — older evidence</span>}</div>}
       <div style={fade}>{clipUrl&&!vidErr&&!pl&&<button onClick={()=>sPl(true)} style={{position:"relative",zIndex:2,width:54,height:54,borderRadius:"50%",background:"rgba(255,255,255,.08)",border:"1.5px solid rgba(255,255,255,.25)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:0,height:0,borderLeft:"15px solid rgba(255,255,255,.9)",borderTop:"9px solid transparent",borderBottom:"9px solid transparent",marginLeft:4}}/></button>}<div style={{position:"absolute",bottom:10,left:12,fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:"rgba(255,255,255,.5)",background:"rgba(0,0,0,.4)",padding:"3px 8px",borderRadius:6}}>{v?.camera} · {v?fT(v.date,st.timeFormat):""}</div></div>
       {oFs&&<button onClick={oFs} style={{position:"absolute",top:12,right:12,background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",borderRadius:6,padding:"4px 8px",cursor:"pointer",color:"rgba(255,255,255,.6)",fontSize:12,zIndex:3}}>⛶</button>}
     </div>
@@ -380,6 +471,7 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
       <div style={{flex:1,height:3,borderRadius:10,background:"rgba(255,255,255,.08)",overflow:"hidden",cursor:"pointer"}} onClick={seekTo}><div style={{width:`${prog}%`,height:"100%",background:"linear-gradient(90deg,#818cf8,#a78bfa)",borderRadius:10}}/></div>
       <span style={{fontSize:10,color:"rgba(255,255,255,.4)",fontFamily:"'JetBrains Mono',monospace"}}>{fmtTime(curTime)}/{fmtTime(dur)}</span>
       <button onClick={()=>{const i=SPEEDS.indexOf(spd);sSpd(SPEEDS[(i+1)%SPEEDS.length]);}} style={{padding:"3px 8px",borderRadius:6,border:"1px solid rgba(167,139,250,.2)",background:spd!==1?"rgba(167,139,250,.2)":"rgba(255,255,255,.04)",color:spd!==1?"#c4b5fd":"rgba(255,255,255,.4)",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>{spd}x</button>
+      {tracksData&&<button onClick={()=>sOverlayOn(o=>!o)} title="Toggle detection-box overlay" style={{padding:"3px 8px",fontSize:10,borderRadius:6,cursor:"pointer",fontWeight:600,background:overlayOn?"rgba(52,211,153,.2)":"rgba(255,255,255,.04)",color:overlayOn?"#34d399":"rgba(255,255,255,.35)",border:`1px solid ${overlayOn?"rgba(52,211,153,.3)":"rgba(255,255,255,.06)"}`}}>▢ OVERLAY</button>}
       <div style={{display:"flex",gap:4}}>{["AI","RAW"].map(m=>(<button key={m} onClick={()=>sAi(m==="AI")} style={{padding:"3px 8px",fontSize:10,borderRadius:6,cursor:"pointer",fontWeight:600,background:(m==="AI"?ai:!ai)?"rgba(167,139,250,.25)":"rgba(255,255,255,.04)",color:(m==="AI"?ai:!ai)?"#c4b5fd":"rgba(255,255,255,.35)",border:`1px solid ${(m==="AI"?ai:!ai)?"rgba(167,139,250,.3)":"rgba(255,255,255,.06)"}`}}>{m}</button>))}</div>
     </div>
   </div>);

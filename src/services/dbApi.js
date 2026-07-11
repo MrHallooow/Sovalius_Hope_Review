@@ -84,3 +84,23 @@ export async function saveCameraLanes(cameraName, laneData, calWidth, calHeight)
 export function isDbAvailable() {
   return !!isElectron;
 }
+
+/**
+ * Fetch + parse a tracks.json sidecar (Phase 3 CPU-erasure, review side).
+ * `url` is the presigned/absolutized tracksUrl from getEvidenceUrls() —
+ * fetched directly by the renderer exactly like the <video>/<img> tags fetch
+ * clipUrl/screenshotUrl. Absence (404, network error, bad JSON, or a schema
+ * that doesn't validate) all resolve to null — never throws — so callers can
+ * treat "no overlay data" as a single, cleanly-checked case.
+ */
+export async function fetchTracksJson(url) {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null; // 404 -> older evidence with no sidecar
+    const data = await res.json();
+    return data;
+  } catch {
+    return null;
+  }
+}

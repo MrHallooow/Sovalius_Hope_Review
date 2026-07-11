@@ -7,6 +7,7 @@
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
     "smoke:gateway": "node scripts/smoke_gateway.mjs",
+    "test": "node --test src/services/*.test.mjs",
     "package": "vite build && electron-builder --win",
     "package:dir": "vite build && electron-builder --win --dir"
   },

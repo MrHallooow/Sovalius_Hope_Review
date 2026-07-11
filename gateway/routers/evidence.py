@@ -1,7 +1,8 @@
 """Evidence read-side: presigned GET URLs + the local blob proxy.
 
 GET /evidence/urls?clipUrl=&screenshotUrl=&rawClipUrl=
-        -> { ok, clipUrl, rawUrl, screenshotUrl }   (bearer auth; nulls, not errors)
+        -> { ok, clipUrl, rawUrl, screenshotUrl, tracksUrl }   (bearer auth;
+        nulls, not errors)
 GET /evidence/blob/{token}                          (LOCAL backend only; NO bearer
         auth — the signed, expiring token IS the capability, mirroring the
         dispatch gateway's unauthenticated presigned blob route)
@@ -17,6 +18,13 @@ Documented divergence from main.js: a bare S3-style key (no scheme, e.g.
 ``violations/VIO-2026-00147/clip.mp4``) is accepted as the key itself. main.js
 returned null there only because ``new URL()`` throws on relative input; local
 dev rows store raw keys, so refusing them would break the local evidence flow.
+
+CPU-erasure Phase 3 (review side): the rack ships a ``tracks.json`` sidecar as
+a SIBLING of ``clip_raw.mp4`` in the same storage folder (the uploader already
+ships any ``.json`` file alongside the clips). ``tracksUrl`` is derived from
+``rawClipUrl``'s key by swapping the filename for ``tracks.json`` and presigned
+through the exact same store — no existence check, same 404-on-fetch semantics
+as every other evidence field.
 """
 
 from __future__ import annotations
@@ -66,6 +74,20 @@ def extract_key(url: str | None) -> str | None:
     return s
 
 
+def sibling_key(key: str | None, filename: str) -> str | None:
+    """Same "folder" as `key`, but with the basename replaced by `filename`.
+
+    Used to locate ``tracks.json`` next to ``clip_raw.mp4`` without any extra
+    metadata — the rack and the uploader both key evidence off the clip's
+    storage folder, so the sidecar's key is derived, never stored.
+    """
+    if not key:
+        return None
+    idx = key.rfind("/")
+    folder = key[: idx + 1] if idx >= 0 else ""
+    return folder + filename
+
+
 @router.get("/evidence/urls")
 def evidence_urls(
     request: Request,
@@ -74,11 +96,15 @@ def evidence_urls(
     rawClipUrl: str | None = None,
     user: models.User = Depends(current_user),
 ) -> dict:
-    """Presigned GETs for the three stored evidence fields of a violation.
+    """Presigned GETs for the stored evidence fields of a violation, plus the
+    derived ``tracks.json`` sidecar for the raw clip.
 
     No existence check before presigning — genuine S3 presign semantics (and
     main.js parity): a URL for a never-uploaded object simply 404s when
-    fetched. Unknown/missing keys -> null fields, never an error.
+    fetched. Unknown/missing keys -> null fields, never an error. This is how
+    old evidence (no tracks.json ever uploaded) degrades gracefully: the
+    review app gets a mintable-but-404ing tracksUrl and treats that as
+    "no overlay data", not a hard error.
     """
     store = _store(request)
 
@@ -86,11 +112,15 @@ def evidence_urls(
         key = extract_key(raw)
         return store.presign_get(key) if key else None
 
+    raw_key = extract_key(rawClipUrl)
+    tracks_key = sibling_key(raw_key, "tracks.json")
+
     return {
         "ok": True,
         "clipUrl": _presign(clipUrl),
         "rawUrl": _presign(rawClipUrl),  # main.js response name for the raw clip
         "screenshotUrl": _presign(screenshotUrl),
+        "tracksUrl": store.presign_get(tracks_key) if tracks_key else None,
     }
 
 

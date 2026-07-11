@@ -432,6 +432,11 @@ async function getEvidenceUrls(rawClipUrl, rawScreenshotUrl, rawRawClipUrl) {
     clipUrl: absolutize(r.data.clipUrl),
     rawUrl: absolutize(r.data.rawUrl),
     screenshotUrl: absolutize(r.data.screenshotUrl),
+    // Phase 3 CPU-erasure (review side): tracks.json sidecar, derived
+    // server-side as a sibling of the raw clip. Null when the rack never
+    // shipped one (old evidence) — the renderer treats that as "no overlay
+    // data available", not an error.
+    tracksUrl: absolutize(r.data.tracksUrl),
   };
 }
 

@@ -291,10 +291,12 @@ def test_evidence_urls_presign_and_fetch():
     )
     assert r.status_code == 200, r.text
     j = r.json()
-    # main.js response names EXACTLY: raw clip comes back as rawUrl.
-    assert set(j) == {"ok", "clipUrl", "rawUrl", "screenshotUrl"}
+    # main.js response names EXACTLY: raw clip comes back as rawUrl. Plus the
+    # derived tracks.json sidecar URL (Phase 3 CPU-erasure, review side).
+    assert set(j) == {"ok", "clipUrl", "rawUrl", "screenshotUrl", "tracksUrl"}
     assert j["ok"] is True
     assert j["rawUrl"] is None
+    assert j["tracksUrl"] is None  # rawClipUrl omitted -> nothing to derive from
 
     # The clip presign is fetchable via TestClient (no bearer auth needed).
     assert j["clipUrl"].startswith("/evidence/blob/")
@@ -326,7 +328,62 @@ def test_evidence_urls_unknown_and_missing_yield_nulls():
         "clipUrl": None,
         "rawUrl": None,
         "screenshotUrl": None,
+        "tracksUrl": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /evidence/urls — tracks.json sidecar derivation (Phase 3 CPU-erasure)
+# ---------------------------------------------------------------------------
+def test_evidence_urls_derives_tracks_sidecar_from_raw_clip():
+    """tracks.json lives NEXT TO clip_raw.mp4 in the same storage folder —
+    the key is derived, never stored, and presigned through the identical
+    store/token mechanism as the clips themselves."""
+    raw_key = "violations/VIO-2026-00200/clip_raw.mp4"
+    tracks_key = "violations/VIO-2026-00200/tracks.json"
+    payload = b'{"version":1,"frames":[]}'
+    app.state.evidence_store.open_for_write(tracks_key, payload)
+
+    a = _login("officer")
+    r = client.get(
+        "/evidence/urls",
+        params={"rawClipUrl": f"https://hope-evidence.s3.us-east-1.amazonaws.com/{raw_key}"},
+        headers=_h(a["accessToken"]),
+    )
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["tracksUrl"] is not None
+    assert j["tracksUrl"].startswith("/evidence/blob/")
+    assert tracks_key not in j["tracksUrl"]  # capability is the signature, never the raw key
+
+    got = client.get(j["tracksUrl"])  # no bearer auth needed — same as other evidence blobs
+    assert got.status_code == 200
+    assert got.content == payload
+    assert got.headers["content-type"] == "application/json"
+
+
+def test_evidence_urls_tracks_sidecar_mints_but_404s_when_never_uploaded():
+    """Old evidence (no tracks.json ever produced) must degrade gracefully:
+    a mintable-but-404ing tracksUrl, never an /urls error."""
+    a = _login("officer")
+    r = client.get(
+        "/evidence/urls",
+        params={"rawClipUrl": "violations/VIO-2026-00201/clip_raw.mp4"},  # bare key, never uploaded
+        headers=_h(a["accessToken"]),
+    )
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["tracksUrl"].startswith("/evidence/blob/")
+    assert client.get(j["tracksUrl"]).status_code == 404
+
+
+def test_sibling_key_derivation():
+    from gateway.routers.evidence import sibling_key
+
+    assert sibling_key("violations/VIO-1/clip_raw.mp4", "tracks.json") == "violations/VIO-1/tracks.json"
+    assert sibling_key("clip_raw.mp4", "tracks.json") == "tracks.json"  # no folder
+    assert sibling_key(None, "tracks.json") is None
+    assert sibling_key("", "tracks.json") is None
 
 
 def test_extract_key_main_js_parity():
