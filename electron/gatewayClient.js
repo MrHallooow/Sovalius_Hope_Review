@@ -40,8 +40,51 @@ let loginWaiters = [];
 // the second presentation of the rotated-out token revokes the whole family.
 let refreshInFlight = null;
 
+/**
+ * Point the client at a gateway.
+ *
+ * The URL decides where JWTs and evidence capabilities are SENT, so it is
+ * validated rather than accepted verbatim:
+ *   * only http/https (a file:/data:/javascript: URL is refused outright);
+ *   * plain http is allowed only to a loopback host — the normal deployment,
+ *     where the gateway runs on the same machine. Cleartext http to any other
+ *     host would put bearer tokens and evidence links on the wire, so it
+ *     requires an explicit HOPE_ALLOW_INSECURE_GATEWAY=1 opt-in.
+ * Anything refused falls back to the loopback default instead of silently
+ * talking to an unvetted host.
+ */
 function init(url) {
-  baseUrl = String(url || DEFAULT_URL).replace(/\/+$/, "");
+  const candidate = String(url || DEFAULT_URL).replace(/\/+$/, "");
+  baseUrl = _vetUrl(candidate) ? candidate : DEFAULT_URL;
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function _vetUrl(candidate) {
+  let u;
+  try {
+    u = new URL(candidate);
+  } catch {
+    console.error(`[gateway] unusable GATEWAY_URL (${candidate}); using ${DEFAULT_URL}`);
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    console.error(`[gateway] refusing non-HTTP gateway URL (${u.protocol}); using ${DEFAULT_URL}`);
+    return false;
+  }
+  if (u.protocol === "http:" && !LOOPBACK.has(u.hostname)) {
+    if (process.env.HOPE_ALLOW_INSECURE_GATEWAY === "1") {
+      console.warn(`[gateway] cleartext HTTP to ${u.hostname} (explicitly allowed)`);
+      return true;
+    }
+    console.error(
+      `[gateway] refusing cleartext HTTP to non-loopback host ${u.hostname}: ` +
+        "use https, or set HOPE_ALLOW_INSECURE_GATEWAY=1 to override. " +
+        `Using ${DEFAULT_URL}`
+    );
+    return false;
+  }
+  return true;
 }
 
 function getBaseUrl() {

@@ -40,6 +40,96 @@ if (isDev) {
 
 gateway.init(process.env.GATEWAY_URL);
 
+// ── Renderer hardening ──
+// The renderer displays evidence and mediates enforcement decisions, so it is
+// locked down as far as the app's actual needs allow:
+//   * sandbox + contextIsolation, no node integration (preload only uses
+//     contextBridge/ipcRenderer, both available in a sandboxed preload);
+//   * a Content-Security-Policy that names exactly the origins in use — the
+//     configured gateway (evidence clips/screenshots/tracks.json) and Google
+//     Fonts — and denies everything else, including frames and objects;
+//   * no navigation away from the app, and no new windows at all.
+// 'unsafe-inline' for styles is unavoidable here: the entire UI is built from
+// React inline style attributes and <style> blocks.
+
+function cspFor(gatewayOrigin) {
+  const gw = gatewayOrigin ? ` ${gatewayOrigin}` : "";
+  return [
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    `img-src 'self' data: blob:${gw}`,
+    `media-src 'self' blob:${gw}`,
+    `connect-src 'self'${gw} https://fonts.googleapis.com`,
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; ");
+}
+
+function gatewayOrigin() {
+  try {
+    return new URL(gateway.getBaseUrl()).origin;
+  } catch {
+    return "";
+  }
+}
+
+function applyCsp(session) {
+  // Dev runs against the Vite dev server, which needs eval/inline scripts for
+  // HMR; the packaged build — the only one that ever holds real casework —
+  // gets the strict policy.
+  if (isDev) return;
+  const policy = cspFor(gatewayOrigin());
+  session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [policy],
+      },
+    });
+  });
+}
+
+function hardenWindow(win) {
+  const appOrigins = new Set(
+    [isDev ? process.env.VITE_DEV_SERVER_URL : null].filter(Boolean).map((u) => {
+      try {
+        return new URL(u).origin;
+      } catch {
+        return "";
+      }
+    })
+  );
+
+  // No navigation off the app: a clicked link (or an injected one) must never
+  // turn the review desk into a browser pointed at an untrusted page.
+  win.webContents.on("will-navigate", (event, url) => {
+    let origin = "";
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      /* unparseable -> blocked below */
+    }
+    const isAppFile = url.startsWith("file://");
+    if (!(isAppFile || appOrigins.has(origin))) event.preventDefault();
+  });
+
+  // No popups, no window.open, no target=_blank surfaces.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+
+  // No <webview> embedding.
+  win.webContents.on("will-attach-webview", (event) => event.preventDefault());
+
+  // No permission grants (camera/mic/geolocation/notifications/...): the app
+  // needs none of them.
+  win.webContents.session.setPermissionRequestHandler((_wc, _perm, callback) =>
+    callback(false)
+  );
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -51,8 +141,13 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
     },
   });
+
+  applyCsp(win.webContents.session);
+  hardenWindow(win);
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL);

@@ -14,8 +14,49 @@ permissions:
   contents: write
 
 jobs:
+  # Nothing ships without the tests passing. The release used to package and
+  # publish an installer without ever running the JavaScript or gateway
+  # suites — a broken review desk could reach a desk unnoticed.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Renderer helper tests
+        run: npm test
+
+      - name: Renderer build (must compile)
+        run: npx vite build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gateway dependencies
+        run: pip install -r gateway/requirements-gateway.txt
+
+      - name: Gateway test suite
+        run: python -m pytest gateway/tests -q
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
   build-windows:
+    needs: test
     runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.sign-status.outputs.signed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,9 +73,26 @@ jobs:
       - name: Build renderer
         run: npx vite build
 
+      # Code signing is what makes the auto-updater's downloaded installer
+      # trustworthy. Sign whenever a certificate is configured; when one is
+      # not, say so loudly instead of quietly shipping an unsigned binary that
+      # the app will nevertheless download and install by itself.
+      - name: Determine signing status
+        id: sign-status
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.WINDOWS_CSC_LINK }}" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned build::No WINDOWS_CSC_LINK secret is configured. This installer will be UNSIGNED, and the auto-updater installs downloaded builds without a signature check."
+          fi
+
       - name: Package Windows installer
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ steps.sign-status.outputs.signed }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win
 
@@ -64,6 +122,15 @@ jobs:
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Signing note
+        id: signing-note
+        run: |
+          if [ "${{ needs.build-windows.outputs.signed }}" = "true" ]; then
+            echo "note=This installer is code-signed." >> "$GITHUB_OUTPUT"
+          else
+            echo "note=⚠️ **This installer is NOT code-signed.** Verify its checksum out-of-band before installing on a review desk." >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -75,14 +142,22 @@ jobs:
             ### Download
             Download the Windows installer below and run it to install HOPE Review.
 
+            ${{ steps.signing-note.outputs.note }}
+
             ### Requirements
             - Windows 10 or later (x64)
-            - PostgreSQL server (for live database mode)
+            - A reachable H.O.P.E. review gateway (FastAPI service, default `http://127.0.0.1:8090`)
 
             ### First Run
             1. Install the app using the Setup `.exe`
-            2. Place a `.env` file next to the installed executable with your PostgreSQL credentials
+            2. If the gateway is not on the default address, place a `.env` next to the
+               installed executable containing **only** `GATEWAY_URL=...`
             3. Launch **HOPE Review** from the Start Menu or Desktop shortcut
+
+            > The desktop app holds **no** database or object-storage credentials. It
+            > authenticates to the gateway and receives short-lived tokens; database and
+            > S3 access live entirely behind the gateway. Never place database or AWS
+            > credentials next to the app.
           files: artifacts/*
           draft: false
           prerelease: false

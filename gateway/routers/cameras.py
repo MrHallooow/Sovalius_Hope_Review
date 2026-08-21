@@ -171,6 +171,85 @@ def get_camera_lanes(
     return {"ok": True, "data": _lanes_json(row, presigned)}
 
 
+# Lane geometry drives where violations are detected, so the write path
+# refuses payloads that cannot describe a real road: the editor works in
+# NORMALISED coordinates (0..1 of the calibration frame), every shape needs
+# enough points to be a shape, and the calibration frame must be a plausible
+# pixel size. Previously any JSON at all was stored verbatim.
+_LANE_COLLECTIONS = ("lanes", "stop_lines", "crossings", "detection_zones", "no_parking_zones")
+# What the lane editor emits, in normalised 0..1 coordinates of the
+# calibration frame (LaneConfigTab clamps every click to that range).
+_NORMALISED_FIELDS = (
+    "normalized_boundaries", "left_points", "right_points", "center_points",
+)
+# Legacy/opaque geometry: shape-checked but not range-checked, because older
+# rows stored raw pixel coordinates under this key.
+_LEGACY_FIELDS = ("points",)
+_POINT_FIELDS = _NORMALISED_FIELDS + _LEGACY_FIELDS
+_MAX_POINTS = 2000
+_MAX_CALIBRATION = 16384
+
+
+def _bad(detail: str) -> HTTPException:
+    return HTTPException(status_code=422, detail=detail)
+
+
+def _validate_points(where: str, pts, *, normalised: bool) -> None:
+    if not isinstance(pts, list):
+        raise _bad(f"{where}: points must be a list")
+    if len(pts) > _MAX_POINTS:
+        raise _bad(f"{where}: too many points ({len(pts)} > {_MAX_POINTS})")
+    for i, p in enumerate(pts):
+        if not (isinstance(p, (list, tuple)) and len(p) == 2):
+            raise _bad(f"{where}[{i}]: each point must be [x, y]")
+        for v in p:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise _bad(f"{where}[{i}]: coordinates must be numbers")
+            if normalised and not (0.0 <= float(v) <= 1.0):
+                raise _bad(
+                    f"{where}[{i}]: coordinates are normalised to 0..1 of the "
+                    f"calibration frame (got {v})"
+                )
+
+
+def _validate_lane_payload(body: LanesPut) -> None:
+    w = int(body.calibration_width or 0)
+    h = int(body.calibration_height or 0)
+    if w < 0 or h < 0 or w > _MAX_CALIBRATION or h > _MAX_CALIBRATION:
+        raise _bad("calibration frame must be between 0 and 16384 pixels per side")
+
+    data = body.lane_data
+    if data is None or data == {} or data == []:
+        return  # clearing a camera's geometry is legitimate
+    if not isinstance(data, dict):
+        raise _bad("lane_data must be an object of shape collections")
+
+    unknown = [k for k in data if k not in _LANE_COLLECTIONS]
+    if unknown:
+        raise _bad(f"unknown lane collection(s): {', '.join(sorted(unknown))}")
+
+    total = 0
+    for name in _LANE_COLLECTIONS:
+        shapes = data.get(name)
+        if shapes is None:
+            continue
+        if not isinstance(shapes, list):
+            raise _bad(f"{name} must be a list")
+        for idx, shape in enumerate(shapes):
+            if not isinstance(shape, dict):
+                raise _bad(f"{name}[{idx}] must be an object")
+            found = [f for f in _POINT_FIELDS if f in shape]
+            if not found:
+                raise _bad(f"{name}[{idx}]: no geometry (expected one of {', '.join(_POINT_FIELDS)})")
+            for f in found:
+                _validate_points(
+                    f"{name}[{idx}].{f}", shape[f], normalised=f in _NORMALISED_FIELDS
+                )
+            total += 1
+    if total == 0 and any(isinstance(data.get(n), list) and data.get(n) for n in _LANE_COLLECTIONS):
+        raise _bad("lane_data contains no usable shapes")
+
+
 @router.put("/cameras/{camera_name}/lanes")
 def put_camera_lanes(
     camera_name: str,
@@ -178,6 +257,8 @@ def put_camera_lanes(
     user: models.User = Depends(_manage_gate),
     db: Session = Depends(get_db),
 ) -> dict:
+    _validate_lane_payload(body)
+
     # UPSERT (main.js ON CONFLICT parity). No FK onto cameras — camera_lanes
     # keys by NAME and the legacy schema never enforced one either.
     row = db.get(models.CameraLane, camera_name)

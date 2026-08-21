@@ -240,6 +240,9 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
   const [historyIdx, setHistoryIdx] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Saving used to be silent in BOTH directions: a failed write only reached
+  // console.error, and a successful one looked identical to no click at all.
+  const [saveState, setSaveState] = useState(null); // {ok:boolean, msg:string}
   const [calWidth, setCalWidth] = useState(1920);
   const [calHeight, setCalHeight] = useState(1080);
   const [dragPointIdx, setDragPointIdx] = useState(null);
@@ -617,12 +620,26 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
         else if (z.type === "detection_zone") { detection_zones.push(base); }
         else if (z.type === "no_parking") { no_parking_zones.push(base); }
       }
-      await saveCameraLanes(camera, { lanes, stop_lines, crossings, detection_zones, no_parking_zones }, calWidth, calHeight);
+      const res = await saveCameraLanes(
+        camera,
+        { lanes, stop_lines, crossings, detection_zones, no_parking_zones },
+        calWidth,
+        calHeight
+      );
+      if (res && res.ok) {
+        const total = lanes.length + stop_lines.length + crossings.length
+          + detection_zones.length + no_parking_zones.length;
+        setSaveState({ ok: true, msg: `Saved ${total} shape${total === 1 ? "" : "s"} for ${camera}` });
+      } else {
+        setSaveState({ ok: false, msg: (res && res.error) || "The gateway rejected this lane configuration" });
+      }
     } catch (err) {
-      console.error("Save failed:", err);
+      setSaveState({ ok: false, msg: err && err.message ? err.message : "Save failed" });
     }
     setSaving(false);
   }, [camera, calWidth, calHeight]);
+
+  useEffect(() => { setSaveState(null); }, [camera]);
 
   const selectedZone = zones.find(z => z.id === selectedId);
   const canUndo = historyIdx > 0;
@@ -996,6 +1013,17 @@ export default function LaneConfigTab({ cameras: propCameras, theme: t }) {
         }} disabled={saving} onClick={handleSave}>
           {saving ? "Saving\u2026" : "Save Configuration"}
         </button>
+
+        {saveState && (
+          <div role={saveState.ok ? "status" : "alert"} style={{
+            padding: "8px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+            background: saveState.ok ? "rgba(52,211,153,.12)" : "rgba(248,113,113,.12)",
+            border: `1px solid ${saveState.ok ? "rgba(52,211,153,.3)" : "rgba(248,113,113,.35)"}`,
+            color: saveState.ok ? "#34d399" : "#f87171",
+          }}>
+            {saveState.ok ? "OK " : "FAILED "}{saveState.msg}
+          </div>
+        )}
       </div>
 
       {/* Canvas Area */}
