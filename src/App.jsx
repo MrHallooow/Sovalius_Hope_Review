@@ -393,7 +393,9 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
     sAnnotatedUrl(null);sRawUrl(null);sSsUrl(null);sVidErr(false);sImgErr(false);sProg(0);sDur(0);
     sTracksData(null);sTracksChecked(false);sOverlayOn(true);
     if(!v||!hasRemote){return;}
-    getEvidenceUrls(v.remoteClipUrl,v.remoteScreenshotUrl,v.remoteRawClipUrl).then(res=>{
+    // Case-bound: the gateway presigns THIS violation's own stored evidence
+    // and audits the access. The renderer never passes an object key.
+    getEvidenceUrls(v.id).then(res=>{
       if(cancelled||!res||!res.ok)return;
       if(res.clipUrl)sAnnotatedUrl(res.clipUrl);
       if(res.rawUrl)sRawUrl(res.rawUrl);
@@ -408,7 +410,9 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
       });
     }).catch(()=>{});
     return()=>{cancelled=true;};
-  },[v?.id]);
+    // Re-fetch when the CASE changes *or* when its evidence pointers change —
+    // evidence can land (or be replaced) while a reviewer has the case open.
+  },[v?.id,v?.remoteClipUrl,v?.remoteRawClipUrl,v?.remoteScreenshotUrl]);
 
   useEffect(()=>{
     sVidErr(false);

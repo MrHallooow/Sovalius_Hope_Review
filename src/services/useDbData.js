@@ -57,6 +57,12 @@ function mapViolationRow(r) {
     remoteClipUrl: r.remote_clip_url || null,
     remoteRawClipUrl: r.remote_raw_clip_url || null,
     remoteScreenshotUrl: r.remote_screenshot_url || null,
+    // Rack enforcement gate. `citable === false` means this case can never
+    // become a citation (the gateway refuses to record an approval for it);
+    // `null` means eligibility is not yet determined. Either way the reviewer
+    // must SEE it before deciding — see the gate banner in the review view.
+    citable: r.citable ?? null,
+    gateReason: r.gateReason || r.gate_reason || "",
   };
 }
 

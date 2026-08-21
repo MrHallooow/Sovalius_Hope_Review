@@ -65,7 +65,9 @@ def _mk_violation(db, vid: str, **kwargs) -> None:
             date=datetime(2026, 3, 20, 9, 0, 0, tzinfo=timezone.utc),
             clip_url="",
             raw_clip_url="",
-            screenshot_url="",
+            # Evidence is present by default: PATCH .../review refuses to
+            # approve a case with no evidence attached at all.
+            screenshot_url="violations/fixture/shot.jpg",
             citable=None,
             gate_reason="",
         )
@@ -167,7 +169,9 @@ def test_dismiss_writes_dismissed_decision_and_null_citable_passthrough():
     try:
         # citable/gate_reason left at defaults (None / "") — nothing populates
         # them for this row, proving passthrough of the "unset" case too.
-        _mk_violation(db, "VIO-OUTB-DISMISS")
+        # Evidence deliberately empty: a DISMISSAL needs no evidence (only an
+        # approval does), and this asserts the empty-evidence passthrough.
+        _mk_violation(db, "VIO-OUTB-DISMISS", screenshot_url="")
         db.commit()
     finally:
         db.close()
@@ -312,3 +316,86 @@ def test_atomic_failure_before_commit_writes_no_outbox_row_and_no_review_change(
     assert r.status_code == 200, r.text
     assert _review_status("VIO-OUTB-ATOMIC") == "approved"
     assert len(_outbox_rows("VIO-OUTB-ATOMIC")) == 1
+
+
+# ---------------------------------------------------------------------------
+# Enforcement gate: a desk must never RECORD an approval the citation bridge
+# is certain to reject. See PATCH /violations/{id}/review.
+# ---------------------------------------------------------------------------
+def test_approval_blocked_when_rack_marked_non_citable():
+    """`citable is False` is the rack's explicit "can never be a citation"
+    verdict — approving it would be a decision that dies downstream while the
+    reviewer sees success. Blocked with the rack's own reason, and NOTHING is
+    written (no review row, no outbox row)."""
+    db = SessionLocal()
+    try:
+        _mk_violation(
+            db,
+            "VIO-GATE-NONCITABLE",
+            citable=False,
+            gate_reason="gate: court-only offence, not a fixed-penalty class",
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    h = _auth("supervisor")
+    r = client.patch(
+        "/violations/VIO-GATE-NONCITABLE/review", headers=h, json={"status": "approved"}
+    )
+    assert r.status_code == 422, r.text
+    assert "court-only offence" in r.json()["message"]
+
+    assert _review_status("VIO-GATE-NONCITABLE") == "pending"
+    assert _outbox_rows("VIO-GATE-NONCITABLE") == []
+
+    # A non-citable case can still be DISMISSED — only approval is gated.
+    r = client.patch(
+        "/violations/VIO-GATE-NONCITABLE/review", headers=h, json={"status": "dismissed"}
+    )
+    assert r.status_code == 200, r.text
+    assert _review_status("VIO-GATE-NONCITABLE") == "dismissed"
+
+
+def test_approval_blocked_when_no_evidence_attached():
+    db = SessionLocal()
+    try:
+        _mk_violation(db, "VIO-GATE-NOEVIDENCE", citable=True, screenshot_url="")
+        db.commit()
+    finally:
+        db.close()
+
+    h = _auth("supervisor")
+    r = client.patch(
+        "/violations/VIO-GATE-NOEVIDENCE/review", headers=h, json={"status": "approved"}
+    )
+    assert r.status_code == 422, r.text
+    assert "no evidence" in r.json()["message"]
+    assert _review_status("VIO-GATE-NOEVIDENCE") == "pending"
+    assert _outbox_rows("VIO-GATE-NOEVIDENCE") == []
+
+
+def test_approval_allowed_when_eligibility_undetermined():
+    """`citable is None` (legacy row, or a rack push that omitted the field)
+    is NOT a known-bad citation — the decision is still a valid review
+    outcome. The row carries citable/gateReason so the desk can tell the
+    reviewer no citation will be minted until the rack confirms."""
+    db = SessionLocal()
+    try:
+        _mk_violation(db, "VIO-GATE-UNKNOWN", citable=None)
+        db.commit()
+    finally:
+        db.close()
+
+    h = _auth("supervisor")
+    r = client.patch(
+        "/violations/VIO-GATE-UNKNOWN/review", headers=h, json={"status": "approved"}
+    )
+    assert r.status_code == 200, r.text
+    assert _review_status("VIO-GATE-UNKNOWN") == "approved"
+
+    # And the board row exposes the undetermined gate to the reviewer.
+    rows = client.get("/violations", headers=h).json()["rows"]
+    row = next(x for x in rows if x["id"] == "VIO-GATE-UNKNOWN")
+    assert row["citable"] is None
+    assert row["gateReason"] == ""

@@ -99,7 +99,9 @@ async function main() {
     assert(r.ok, r.error);
     assert(Array.isArray(r.rows) && r.rows.length > 0, "no violation rows (seed the dev DB)");
     const row = r.rows[0];
-    for (const k of ["violation_type", "timestamp", "license_plate", "extra_data", "review_status"]) {
+    for (const k of ["violation_type", "timestamp", "license_plate", "extra_data", "review_status",
+                     // enforcement gate — the desk must be able to SHOW it
+                     "citable", "gateReason"]) {
       assert(k in row, `legacy field '${k}' missing from violation row`);
     }
     firstViolation = row;
@@ -153,20 +155,28 @@ async function main() {
     return `${r.rows.length} rows`;
   });
 
-  // 6. Evidence presigned URLs (presign needs no object to exist — S3
-  //    semantics; the URL must be absolute so <video>/<img> can load it).
-  await step("GET evidence URLs (presigned, absolute)", async () => {
-    const r = await gateway.getEvidenceUrls(
-      "violations/SMOKE-TEST/clip.mp4",
-      "violations/SMOKE-TEST/shot.jpg",
-      null
-    );
+  // 6. Evidence presigned URLs — CASE-BOUND: asked for by violation id, never
+  //    by object key. Presign needs no object to exist (S3 semantics); the URL
+  //    must be absolute so <video>/<img> can load it.
+  await step("GET case evidence URLs (case-bound, absolute)", async () => {
+    assert(firstViolation, "no violation to fetch evidence for");
+    const r = await gateway.getEvidenceUrls(firstViolation.id);
     assert(r.ok, r.error);
-    assert(typeof r.clipUrl === "string" && r.clipUrl.length > 0, "no clip URL");
-    assert(/^https?:\/\//.test(r.clipUrl), `clip URL not absolute: ${r.clipUrl.slice(0, 40)}`);
-    assert(r.rawUrl === null, "rawUrl should be null when no raw clip is stored");
-    assert(typeof r.screenshotUrl === "string", "no screenshot URL");
-    return "clip+screenshot presigned";
+    for (const k of ["clipUrl", "rawUrl", "screenshotUrl", "tracksUrl"]) {
+      assert(k in r, `evidence field '${k}' missing`);
+      assert(
+        r[k] === null || /^https?:\/\//.test(r[k]),
+        `${k} not absolute: ${String(r[k]).slice(0, 40)}`
+      );
+    }
+    return "case evidence presigned";
+  });
+
+  // 6b. A key can no longer be smuggled in, and an unknown case 404s.
+  await step("evidence for an unknown case is refused", async () => {
+    const r = await gateway.getEvidenceUrls("VIO-DOES-NOT-EXIST-SMOKE");
+    assert(!r.ok, "unknown case must not mint evidence URLs");
+    return `refused: ${r.error}`;
   });
 
   // 7. Prefs round-trip against the token user's own row, then restore.

@@ -146,7 +146,8 @@ class RackViolationIngest(_Permissive):
     violation ingestion". ``id`` is the rack-minted canonical violation_uid;
     it becomes this gateway's Violation.id VERBATIM. ``citable`` is required
     per the contract's payload shape, but the router stores an absent value
-    as None honestly rather than 400ing (see rack_ingest.py)."""
+    as None honestly rather than 400ing (see rack_ingest.py); the review desk
+    renders an unknown gate as "eligibility not determined"."""
 
     id: str
     type: str

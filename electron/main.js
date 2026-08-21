@@ -201,9 +201,11 @@ ipcMain.handle("auth:delete-user", async (_event, userId) => {
 });
 
 // ── Evidence pre-signed URLs (via gateway; no AWS credentials here) ──
+// CASE-BOUND: the renderer names a violation, never an object key. The
+// gateway presigns that case's own stored evidence and audits the issuance.
 
-ipcMain.handle("evidence:get-urls", async (_event, rawClipUrl, rawScreenshotUrl, rawRawClipUrl) => {
-  return gateway.getEvidenceUrls(rawClipUrl, rawScreenshotUrl, rawRawClipUrl);
+ipcMain.handle("evidence:get-urls", async (_event, violationId) => {
+  return gateway.getEvidenceUrls(violationId);
 });
 
 // ── Camera Lanes ──

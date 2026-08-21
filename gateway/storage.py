@@ -234,6 +234,15 @@ class LocalDiskStore:
             return None
         return p.read_bytes()
 
+    def path_for_read(self, key: str):
+        """Return an object path for ranged HTTP delivery.
+
+        This avoids copying a whole evidence clip into gateway memory before a
+        reviewer can seek through it.
+        """
+        p = self._path(key)
+        return p if p.is_file() else None
+
     def head(self, key: str) -> ObjectInfo | None:
         p = self._path(key)
         if not p.is_file():

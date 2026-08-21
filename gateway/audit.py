@@ -56,6 +56,7 @@ _PREFIX = {
     "review_reopened": "AUD-RRE",  # decided -> pending (a canRevise action)
     "review_notes": "AUD-RNT",  # notes-only edit of a review
     "violation_viewed": "AUD-RVW",
+    "evidence_accessed": "AUD-EVD",  # short-lived evidence links issued for a case
     "pinned": "AUD-RPN",
     "user_admin": "AUD-USR",
     "camera_change": "AUD-CAM",

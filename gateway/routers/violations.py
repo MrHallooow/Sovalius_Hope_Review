@@ -93,6 +93,9 @@ def _violation_row(v: models.Violation, r: models.ViolationReview | None) -> dic
         "review_notes": (r.notes if r is not None else None) or "",
         "review_pinned": bool(r.pinned) if r is not None else False,
         "review_history": (r.history if r is not None else None) or [],
+        # Enforcement gate: reviewers need to see it and approval enforces it.
+        "citable": v.citable,
+        "gateReason": v.gate_reason or "",
     }
 
 
@@ -244,6 +247,31 @@ def patch_review(
             raise HTTPException(
                 status_code=403, detail="canDismiss privilege required"
             )
+        # ---- enforcement gate (fail-closed on a KNOWN-bad citation) ----
+        # A desk must never record an approval the citation bridge is certain
+        # to reject. `citable is False` is the rack's explicit "this can never
+        # become a citation" verdict, so approving it would be a decision that
+        # silently dies downstream. `citable is None` (eligibility not yet
+        # determined — legacy rows, or a rack push that omitted the field) is
+        # NOT blocked: the decision is still a valid review outcome, and the
+        # row carries citable/gateReason so the desk shows the reviewer that
+        # no citation will be minted until the rack confirms eligibility.
+        if new_status == "approved":
+            if v.citable is False:
+                reason = (v.gate_reason or "").strip()
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Not eligible for citation approval"
+                        + (f": {reason}" if reason else "")
+                    ),
+                )
+            # An approval with no evidence at all can never be defended.
+            if not (v.clip_url or v.raw_clip_url or v.screenshot_url):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Cannot approve: this violation has no evidence attached",
+                )
 
     # ---- no-op: nothing to write, nothing to audit ----
     if not (status_changed or notes_changed or pinned_changed):

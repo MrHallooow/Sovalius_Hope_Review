@@ -418,14 +418,17 @@ async function saveCameraLanes(cameraName, laneData, calWidth, calHeight) {
 // Evidence
 // --------------------------------------------------------------------------
 
-async function getEvidenceUrls(rawClipUrl, rawScreenshotUrl, rawRawClipUrl) {
-  const r = await request("GET", "/evidence/urls", {
-    query: {
-      clipUrl: rawClipUrl || undefined,
-      screenshotUrl: rawScreenshotUrl || undefined,
-      rawClipUrl: rawRawClipUrl || undefined,
-    },
-  });
+/**
+ * Evidence is CASE-BOUND: the caller names a violation id and the gateway
+ * presigns that violation's OWN stored keys, auditing the issuance. The old
+ * key-taking `/evidence/urls` is retired — it let any authenticated caller
+ * mint a capability for an arbitrary object path with no case link and no
+ * audit row.
+ */
+async function getEvidenceUrls(violationId) {
+  const id = String(violationId ?? "").trim();
+  if (!id) return { ok: false, error: "No violation id", code: "bad_request", retryable: false };
+  const r = await request("GET", `/violations/${encodeURIComponent(id)}/evidence`);
   if (!r.ok) return _fail(r);
   return {
     ok: true,

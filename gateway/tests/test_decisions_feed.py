@@ -64,7 +64,9 @@ def _mk_violation(db, vid: str, **kwargs) -> None:
             date=datetime(2026, 3, 20, 9, 0, 0, tzinfo=timezone.utc),
             clip_url="",
             raw_clip_url="",
-            screenshot_url="",
+            # A case with no evidence at all cannot be approved (see
+            # PATCH /violations/{id}/review), so fixtures carry a screenshot.
+            screenshot_url="violations/fixture/shot.jpg",
             citable=None,
             gate_reason="",
         )

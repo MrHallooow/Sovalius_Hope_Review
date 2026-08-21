@@ -62,10 +62,15 @@ def _auth(username: str) -> dict:
 # Direct-DB fixture helpers (fast; no bcrypt where avoidable)
 # ---------------------------------------------------------------------------
 def _mk_violation(db, vid: str, *, vtype: str = "MatrixTest",
-                  date: datetime = _OLD, history: list | None = None) -> None:
+                  date: datetime = _OLD, history: list | None = None,
+                  screenshot_url: str = "violations/fixture/shot.jpg") -> None:
+    """Fixture case. Carries a screenshot by default because a rack-ingested
+    violation ALWAYS ships evidence — and PATCH .../review refuses to approve
+    a case with none (an approval with no evidence can never be defended)."""
     if db.get(models.Violation, vid) is None:
         db.add(models.Violation(id=vid, type=vtype, date=date,
-                                history=history or []))
+                                history=history or [],
+                                screenshot_url=screenshot_url))
 
 
 def _mk_review(db, vid: str, status: str, *, by: str = "Seeder",

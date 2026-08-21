@@ -71,7 +71,7 @@ def _camera_change_rows(**detail_match) -> list:
 def test_cameras_and_evidence_require_auth():
     assert client.get("/cameras").status_code == 401
     assert client.get("/cameras/CAM-AV-07/lanes").status_code == 401
-    assert client.get("/evidence/urls").status_code == 401
+    assert client.get("/violations/VIO-EVD-A/evidence").status_code == 401
     j = client.get("/cameras").json()
     assert j["code"] == "unauthorized"  # app error-mapping shape
 
@@ -270,25 +270,66 @@ def test_lanes_background_frame_presigned_fetchable():
 
 
 # ---------------------------------------------------------------------------
-# GET /evidence/urls — main.js extractS3Key parity + presign fetch
+# GET /violations/{id}/evidence — case-bound presign + key-extraction parity
 # ---------------------------------------------------------------------------
-def test_evidence_urls_presign_and_fetch():
-    key = "violations/VIO-2026-00147/clip.mp4"
+def _mk_violation(vid: str, **cols):
+    """Insert a violation carrying the evidence pointers under test."""
+    from datetime import datetime, timezone
+
+    from gateway import models
+    from gateway.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if db.get(models.Violation, vid) is None:
+            db.add(
+                models.Violation(
+                    id=vid,
+                    type="Speeding",
+                    date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+                    **cols,
+                )
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
+def _evidence_rows(violation_id: str) -> list:
+    """evidence_accessed audit rows for one case (content-matched, not counted)."""
+    from gateway import models
+    from gateway.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return (
+            db.query(models.AuditLog)
+            .filter(
+                models.AuditLog.action == "evidence_accessed",
+                models.AuditLog.violation_id == violation_id,
+            )
+            .order_by(models.AuditLog.seq.asc())
+            .all()
+        )
+    finally:
+        db.close()
+
+
+def test_evidence_presign_and_fetch():
+    key = "violations/VIO-EVD-A/clip.mp4"
     payload = b"mp4-clip-bytes"
     app.state.evidence_store.open_for_write(key, payload)
+    _mk_violation(
+        "VIO-EVD-A",
+        # absolute URL -> pathname minus leading slash (main.js parity)
+        clip_url=f"https://hope-evidence.s3.us-east-1.amazonaws.com/{key}",
+        # bare key -> itself (documented divergence for local dev rows)
+        screenshot_url="violations/VIO-EVD-A/shot.jpg",
+        raw_clip_url="",  # no raw clip -> rawUrl AND tracksUrl null
+    )
 
     a = _login("officer")
-    r = client.get(
-        "/evidence/urls",
-        params={
-            # absolute URL -> pathname minus leading slash (main.js parity)
-            "clipUrl": f"https://hope-evidence.s3.us-east-1.amazonaws.com/{key}",
-            # bare key -> itself (documented divergence for local dev rows)
-            "screenshotUrl": "violations/VIO-2026-00147/shot.jpg",
-            # rawClipUrl omitted entirely -> rawUrl null
-        },
-        headers=_h(a["accessToken"]),
-    )
+    r = client.get("/violations/VIO-EVD-A/evidence", headers=_h(a["accessToken"]))
     assert r.status_code == 200, r.text
     j = r.json()
     # main.js response names EXACTLY: raw clip comes back as rawUrl. Plus the
@@ -296,7 +337,7 @@ def test_evidence_urls_presign_and_fetch():
     assert set(j) == {"ok", "clipUrl", "rawUrl", "screenshotUrl", "tracksUrl"}
     assert j["ok"] is True
     assert j["rawUrl"] is None
-    assert j["tracksUrl"] is None  # rawClipUrl omitted -> nothing to derive from
+    assert j["tracksUrl"] is None  # no raw clip -> nothing to derive from
 
     # The clip presign is fetchable via TestClient (no bearer auth needed).
     assert j["clipUrl"].startswith("/evidence/blob/")
@@ -306,22 +347,29 @@ def test_evidence_urls_presign_and_fetch():
     assert got.headers["content-type"] == "video/mp4"
 
     # Presign does NOT check existence (S3 semantics + main.js parity): the
-    # screenshot URL mints fine but 404s on fetch — never an /urls error.
+    # screenshot URL mints fine but 404s on fetch — never an issuance error.
     assert j["screenshotUrl"].startswith("/evidence/blob/")
     assert client.get(j["screenshotUrl"]).status_code == 404
 
+    # Every issuance is attributable: who, which case, which capabilities —
+    # and never the signed URLs themselves (they are bearer secrets).
+    rows = _evidence_rows("VIO-EVD-A")
+    assert rows, "evidence access must be audited"
+    last = rows[-1]
+    assert last.officer == "officer"
+    assert last.detail["issued"] == ["clipUrl", "screenshotUrl"]
+    assert "/evidence/blob/" not in str(last.detail)
 
-def test_evidence_urls_unknown_and_missing_yield_nulls():
-    a = _login("officer")
-    r = client.get(
-        "/evidence/urls",
-        params={
-            "clipUrl": "/rooted/path.mp4",  # new URL("/x") throws in JS -> null
-            "screenshotUrl": "",  # empty -> null
-            "rawClipUrl": "https://host.example/",  # no path -> null
-        },
-        headers=_h(a["accessToken"]),
+
+def test_evidence_unknown_and_missing_yield_nulls():
+    _mk_violation(
+        "VIO-EVD-B",
+        clip_url="/rooted/path.mp4",  # new URL("/x") throws in JS -> null
+        screenshot_url="",  # empty -> null
+        raw_clip_url="https://host.example/",  # no path -> null
     )
+    a = _login("officer")
+    r = client.get("/violations/VIO-EVD-B/evidence", headers=_h(a["accessToken"]))
     assert r.status_code == 200
     assert r.json() == {
         "ok": True,
@@ -332,24 +380,31 @@ def test_evidence_urls_unknown_and_missing_yield_nulls():
     }
 
 
+def test_evidence_for_unknown_violation_is_404():
+    """A key can no longer be smuggled in: evidence exists only for a case."""
+    a = _login("officer")
+    r = client.get("/violations/VIO-DOES-NOT-EXIST/evidence", headers=_h(a["accessToken"]))
+    assert r.status_code == 404
+
+
 # ---------------------------------------------------------------------------
-# GET /evidence/urls — tracks.json sidecar derivation (Phase 3 CPU-erasure)
+# tracks.json sidecar derivation (Phase 3 CPU-erasure)
 # ---------------------------------------------------------------------------
-def test_evidence_urls_derives_tracks_sidecar_from_raw_clip():
+def test_evidence_derives_tracks_sidecar_from_raw_clip():
     """tracks.json lives NEXT TO clip_raw.mp4 in the same storage folder —
     the key is derived, never stored, and presigned through the identical
     store/token mechanism as the clips themselves."""
-    raw_key = "violations/VIO-2026-00200/clip_raw.mp4"
-    tracks_key = "violations/VIO-2026-00200/tracks.json"
+    raw_key = "violations/VIO-EVD-C/clip_raw.mp4"
+    tracks_key = "violations/VIO-EVD-C/tracks.json"
     payload = b'{"version":1,"frames":[]}'
     app.state.evidence_store.open_for_write(tracks_key, payload)
+    _mk_violation(
+        "VIO-EVD-C",
+        raw_clip_url=f"https://hope-evidence.s3.us-east-1.amazonaws.com/{raw_key}",
+    )
 
     a = _login("officer")
-    r = client.get(
-        "/evidence/urls",
-        params={"rawClipUrl": f"https://hope-evidence.s3.us-east-1.amazonaws.com/{raw_key}"},
-        headers=_h(a["accessToken"]),
-    )
+    r = client.get("/violations/VIO-EVD-C/evidence", headers=_h(a["accessToken"]))
     assert r.status_code == 200, r.text
     j = r.json()
     assert j["tracksUrl"] is not None
@@ -362,15 +417,15 @@ def test_evidence_urls_derives_tracks_sidecar_from_raw_clip():
     assert got.headers["content-type"] == "application/json"
 
 
-def test_evidence_urls_tracks_sidecar_mints_but_404s_when_never_uploaded():
+def test_evidence_tracks_sidecar_mints_but_404s_when_never_uploaded():
     """Old evidence (no tracks.json ever produced) must degrade gracefully:
-    a mintable-but-404ing tracksUrl, never an /urls error."""
-    a = _login("officer")
-    r = client.get(
-        "/evidence/urls",
-        params={"rawClipUrl": "violations/VIO-2026-00201/clip_raw.mp4"},  # bare key, never uploaded
-        headers=_h(a["accessToken"]),
+    a mintable-but-404ing tracksUrl, never an issuance error."""
+    _mk_violation(
+        "VIO-EVD-D",
+        raw_clip_url="violations/VIO-EVD-D/clip_raw.mp4",  # bare key, never uploaded
     )
+    a = _login("officer")
+    r = client.get("/violations/VIO-EVD-D/evidence", headers=_h(a["accessToken"]))
     assert r.status_code == 200, r.text
     j = r.json()
     assert j["tracksUrl"].startswith("/evidence/blob/")
@@ -412,7 +467,7 @@ def test_extract_key_main_js_parity():
 def test_blob_route_rejects_bad_tokens_uniformly():
     from gateway.storage import mint_blob_token
 
-    key = "violations/VIO-2026-00147/clip.mp4"  # exists (uploaded above)
+    key = "violations/VIO-EVD-A/clip.mp4"  # exists (uploaded above)
 
     # Garbage token.
     assert client.get("/evidence/blob/not-a-token").status_code == 404

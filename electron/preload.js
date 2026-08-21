@@ -40,8 +40,8 @@ contextBridge.exposeInMainWorld("hopeAuth", {
 });
 
 contextBridge.exposeInMainWorld("hopeEvidence", {
-  getUrls: (clipUrl, screenshotUrl, rawClipUrl) =>
-    ipcRenderer.invoke("evidence:get-urls", clipUrl, screenshotUrl, rawClipUrl),
+  // Evidence is addressed by CASE, never by object key.
+  getUrls: (violationId) => ipcRenderer.invoke("evidence:get-urls", violationId),
 });
 
 contextBridge.exposeInMainWorld("hopePrefs", {

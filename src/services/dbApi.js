@@ -60,10 +60,15 @@ export async function getAnalytics() {
   return window.hopeDb.getAnalytics();
 }
 
-export async function getEvidenceUrls(remoteClipUrl, remoteScreenshotUrl, remoteRawClipUrl) {
-  if (!remoteClipUrl && !remoteScreenshotUrl) return null;
+/**
+ * Short-lived evidence links for ONE case. The renderer never handles object
+ * keys: it asks by violation id and the gateway presigns that violation's own
+ * stored evidence, writing an `evidence_accessed` audit row for the access.
+ */
+export async function getEvidenceUrls(violationId) {
+  if (!violationId) return null;
   if (typeof window === "undefined" || !window.hopeEvidence) return null;
-  return window.hopeEvidence.getUrls(remoteClipUrl, remoteScreenshotUrl, remoteRawClipUrl);
+  return window.hopeEvidence.getUrls(violationId);
 }
 
 export async function getCameraLanes(cameraName) {
