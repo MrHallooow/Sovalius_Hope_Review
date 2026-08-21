@@ -64,4 +64,5 @@ contextBridge.exposeInMainWorld("hopeUpdater", {
   download: () => ipcRenderer.invoke("updater:download"),
   install: () => ipcRenderer.invoke("updater:install"),
   getVersion: () => ipcRenderer.invoke("updater:get-version"),
+  setAuto: (enabled) => ipcRenderer.invoke("updater:set-auto", enabled),
 });

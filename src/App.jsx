@@ -312,6 +312,9 @@ function TimeoutWarning({left,onDismiss}){
 /* ═══ TRACK OVERLAY (canvas bbox player, Phase 3 CPU-erasure) ═══ */
 function TrackOverlay({videoRef:vR,tracksData:td,active}){
   const cvRef=useRef(null);
+  // Settings > Video > Annotation opacity. The stored value used to control
+  // nothing; the overlay always drew at full strength.
+  const opacity=(()=>{const o=useContext(StC).annotationOpacity;return typeof o==="number"?Math.min(1,Math.max(.2,o)):1;})();
   useEffect(()=>{
     const video=vR.current,canvas=cvRef.current;
     if(!video||!canvas)return;
@@ -325,6 +328,7 @@ function TrackOverlay({videoRef:vR,tracksData:td,active}){
       if(canvas.width!==pw||canvas.height!==ph){canvas.width=pw;canvas.height=ph;}
       ctx.setTransform(dpr,0,0,dpr,0,0);
       ctx.clearRect(0,0,w,h);
+      ctx.globalAlpha=opacity;
       if(!active||!td||!video.videoWidth||!video.videoHeight)return;
       const frame=findFrameAtTime(td.frames,td.clip_start_pts_ns,video.currentTime);
       if(!frame||!frame.tracks)return;
@@ -376,7 +380,7 @@ function TrackOverlay({videoRef:vR,tracksData:td,active}){
       if(rafId)cancelAnimationFrame(rafId);
       if(rvfcId&&typeof video.cancelVideoFrameCallback==="function")video.cancelVideoFrameCallback(rvfcId);
     };
-  },[vR,td,active]);
+  },[vR,td,active,opacity]);
   return(<canvas ref={cvRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:1}}/>);
 }
 
@@ -639,10 +643,17 @@ function DP({violation:v,onAction:oA,user:us,compact:cp=false,approveRef:aR,dism
   // A DECISION IS ONLY REAL ONCE THE SERVER SAYS SO. `done` is set from the
   // gateway's confirmation, never optimistically — the old code set it before
   // the write and showed "CONFIRMED" for rejected decisions.
+  // Settings > Review > Confirm actions. Previously stored and never read:
+  // the toggle claimed a confirmation step that did not exist. Now the first
+  // press ARMS the decision and only the second commits it.
+  const[arm,sArm]=useState(null);
+  useEffect(()=>{sArm(null);},[v.id,isR,notes]);
   const doA=async s=>{
     const ml=st.minNoteLength||0;if(!notes.trim()||notes.trim().length<ml)return;
     if(s==="approved"&&blockApprove){sErr(`Cannot approve — ${blockApprove}`);return;}
     if(busy)return;
+    if(st.confirmActions&&arm!==s){sArm(s);sErr("");return;}
+    sArm(null);
     sErr("");sBusy(s);
     const res=await oA(v.id,s,notes);
     sBusy(null);
@@ -661,8 +672,8 @@ function DP({violation:v,onAction:oA,user:us,compact:cp=false,approveRef:aR,dism
     {v.citable===null&&!blockApprove&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:"rgba(96,165,250,.1)",border:"1px solid rgba(96,165,250,.25)",fontSize:11,color:"#60a5fa",fontWeight:600}}>ℹ Citation eligibility not yet determined — an approval is recorded, but no citation is minted until the enforcement gate confirms.</div>}
     {err&&<div role="alert" style={{marginTop:10,padding:"9px 12px",borderRadius:8,background:"rgba(248,113,113,.12)",border:"1px solid rgba(248,113,113,.35)",fontSize:12,color:"#f87171",fontWeight:600}}>✕ {err}</div>}
     <div style={{display:"flex",gap:10,marginTop:10}}>{(()=>{const aOk=ok&&!busy&&!blockApprove,dOk=ok&&!busy;return(<>
-      <button onClick={()=>doA("approved")} disabled={!aOk} title={blockApprove||undefined} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:aOk?"linear-gradient(135deg,#059669,#34d399)":t.iB,color:aOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:aOk?"pointer":"not-allowed"}}>{busy==="approved"?"RECORDING…":"✓ APPROVE"}</button>
-      <button onClick={()=>doA("dismissed")} disabled={!dOk} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:dOk?"linear-gradient(135deg,#dc2626,#f87171)":t.iB,color:dOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:dOk?"pointer":"not-allowed"}}>{busy==="dismissed"?"RECORDING…":"✕ DISMISS"}</button>
+      <button onClick={()=>doA("approved")} disabled={!aOk} title={blockApprove||undefined} style={{flex:1,padding:"11px 0",borderRadius:10,border:arm==="approved"?"2px solid #fff":"none",background:aOk?"linear-gradient(135deg,#059669,#34d399)":t.iB,color:aOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:aOk?"pointer":"not-allowed"}}>{busy==="approved"?"RECORDING…":arm==="approved"?"CONFIRM APPROVE":"✓ APPROVE"}</button>
+      <button onClick={()=>doA("dismissed")} disabled={!dOk} style={{flex:1,padding:"11px 0",borderRadius:10,border:arm==="dismissed"?"2px solid #fff":"none",background:dOk?"linear-gradient(135deg,#dc2626,#f87171)":t.iB,color:dOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:dOk?"pointer":"not-allowed"}}>{busy==="dismissed"?"RECORDING…":arm==="dismissed"?"CONFIRM DISMISS":"✕ DISMISS"}</button>
     </>);})()}</div>
   </div>);
 }
@@ -759,7 +770,9 @@ function ReviewedRow({v,onSelect,onPin,onRevise,onUndo,dense,scale,cols}){
 /* ═══ DASHBOARD ═══ */
 function Dash({violations:vs,onSelect:oSel,analytics:an,onPin:oP,onUndo:oU,onRevise:oRv}){
   const t=T[useContext(ThC)],st=useContext(StC),c=useContext(CC);const s=sc(st.fontSize);const dn=st.queueDensity==="compact";
-  const[qSe,sQSe]=useState("");const[qSo,sQSo]=useState("time");const[qTF,sQTF]=useState("all");
+  // st.queueSort / st.defaultFilter were stored but never read — the queue
+  // always opened on "time"/"all" whatever the reviewer had chosen.
+  const[qSe,sQSe]=useState("");const[qSo,sQSo]=useState(st.queueSort||"time");const[qTF,sQTF]=useState(st.defaultFilter||"all");
   const[rSe,sRSe]=useState("");const[rSo,sRSo]=useState("time");const[rSF,sRSF]=useState("all");
   const pending=vs.filter(v=>v.status==="pending");const reviewed=vs.filter(v=>v.status!=="pending");
   let qL=[...pending];if(qSe){const q=qSe.toLowerCase();qL=qL.filter(v=>v.id.toLowerCase().includes(q)||v.plate.toLowerCase().includes(q)||v.location.toLowerCase().includes(q));}if(qTF!=="all")qL=qL.filter(v=>v.type===qTF);if(qSo==="confidence")qL.sort((a,b)=>a.confidence-b.confidence);else if(qSo==="type")qL.sort((a,b)=>a.type.localeCompare(b.type));qL.sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
@@ -811,11 +824,11 @@ function Settings({settings:st,setSettings:sS,user:us,theme:th,setTheme:sTh,keyb
   return(<div ref={sRef} style={{maxWidth:700,margin:"0 auto"}}><h2 style={{fontSize:20,fontWeight:800,color:t.tx,margin:"0 0 20px"}}>Settings</h2>
     <S title="Appearance"><Row label="Theme"><div style={{display:"flex",gap:4}}>{["dark","light"].map(m=>(<P key={m} label={m==="dark"?"☾ Dark":"☀ Light"} active={th===m} onClick={()=>sTh(m)}/>))}</div></Row><Row label="Font"><div style={{display:"flex",gap:4}}>{["small","medium","large"].map(x=>(<P key={x} label={x[0].toUpperCase()+x.slice(1)} active={(st.fontSize||"medium")===x} onClick={()=>upd(p=>({...p,fontSize:x}))}/>))}</div></Row><Tog label="Color blind" value={!!st.colorBlind} onChange={v=>upd(p=>({...p,colorBlind:v}))}/><Row label="Time"><div style={{display:"flex",gap:4}}>{["24h","12h"].map(f=>(<P key={f} label={f} active={(st.timeFormat||"24h")===f} onClick={()=>upd(p=>({...p,timeFormat:f}))}/>))}</div></Row></S>
     <S title="Queue"><Row label="Density"><div style={{display:"flex",gap:4}}>{["compact","comfortable"].map(d=>(<P key={d} label={d[0].toUpperCase()+d.slice(1)} active={(st.queueDensity||"comfortable")===d} onClick={()=>upd(p=>({...p,queueDensity:d}))}/>))}</div></Row><Tog label="Hover preview" value={st.hoverPreview!==false} onChange={v=>upd(p=>({...p,hoverPreview:v}))}/></S>
-    <S title="Video"><Tog label="Auto-play" value={!!st.autoPlay} onChange={v=>upd(p=>({...p,autoPlay:v}))}/><Row label="Speed"><div style={{display:"flex",gap:4}}>{SPEEDS.map(x=>(<P key={x} label={x+"x"} active={(st.playbackSpeed||1)===x} onClick={()=>upd(p=>({...p,playbackSpeed:x}))}/>))}</div></Row><Row label="Auto-hide"><div style={{display:"flex",alignItems:"center"}}><input type="range" min="1" max="10" step="1" value={st.autoHideDelay||3} onChange={e=>upd(p=>({...p,autoHideDelay:parseInt(e.target.value)}))} style={{width:100,accentColor:"#a78bfa"}}/><span style={{fontSize:11,color:t.tM,fontFamily:"'JetBrains Mono',monospace",marginLeft:8}}>{st.autoHideDelay||3}s</span></div></Row></S>
+    <S title="Video"><Tog label="Auto-play" value={!!st.autoPlay} onChange={v=>upd(p=>({...p,autoPlay:v}))}/><Row label="Annotation opacity"><div style={{display:"flex",alignItems:"center"}}><input type="range" min="20" max="100" step="10" value={Math.round((st.annotationOpacity??1)*100)} onChange={e=>upd(p=>({...p,annotationOpacity:parseInt(e.target.value)/100}))} style={{width:100,accentColor:"#a78bfa"}}/><span style={{fontSize:11,color:t.tM,fontFamily:"'JetBrains Mono',monospace",marginLeft:8}}>{Math.round((st.annotationOpacity??1)*100)}%</span></div></Row><Row label="Speed"><div style={{display:"flex",gap:4}}>{SPEEDS.map(x=>(<P key={x} label={x+"x"} active={(st.playbackSpeed||1)===x} onClick={()=>upd(p=>({...p,playbackSpeed:x}))}/>))}</div></Row><Row label="Auto-hide"><div style={{display:"flex",alignItems:"center"}}><input type="range" min="1" max="10" step="1" value={st.autoHideDelay||3} onChange={e=>upd(p=>({...p,autoHideDelay:parseInt(e.target.value)}))} style={{width:100,accentColor:"#a78bfa"}}/><span style={{fontSize:11,color:t.tM,fontFamily:"'JetBrains Mono',monospace",marginLeft:8}}>{st.autoHideDelay||3}s</span></div></Row></S>
     <S title="Review"><Tog label="Auto-advance" value={!!st.autoAdvance} onChange={v=>upd(p=>({...p,autoAdvance:v}))}/><Tog label="Confirm actions" value={!!st.confirmActions} onChange={v=>upd(p=>({...p,confirmActions:v}))}/><Row label="Nav placement"><Sel value={st.navPlacement||"bottom"} onChange={e=>upd(p=>({...p,navPlacement:e.target.value}))} options={NPL}/></Row><Row label="Sidebar"><div style={{display:"flex",gap:4}}>{["left","right"].map(x=>(<P key={x} label={x[0].toUpperCase()+x.slice(1)} active={(st.sidebarPos||"right")===x} onClick={()=>upd(p=>({...p,sidebarPos:x}))}/>))}</div></Row></S>
     <S title="Security"><Row label="Session timeout (min)"><div style={{display:"flex",alignItems:"center"}}><input type="range" min="5" max="120" step="5" value={st.sessionTimeout||30} onChange={e=>upd(p=>({...p,sessionTimeout:parseInt(e.target.value)}))} style={{width:100,accentColor:"#a78bfa"}}/><span style={{fontSize:11,color:t.tM,fontFamily:"'JetBrains Mono',monospace",marginLeft:8}}>{st.sessionTimeout||30}m</span></div></Row></S>
     <S title="Keybinds"><p style={{fontSize:11,color:t.tD,margin:"0 0 8px"}}>Click to rebind</p>{Object.entries(kb).map(([a,b])=>(<div key={a} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${t.dv}`}}><span style={{fontSize:12,color:t.tM}}>{b.desc}</span><button onClick={()=>sRb(a)} style={{padding:"3px 10px",borderRadius:6,border:`1px solid ${rb===a?"rgba(167,139,250,.5)":t.iBo}`,background:rb===a?"rgba(167,139,250,.2)":t.iB,color:rb===a?"#c4b5fd":t.tx,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",minWidth:60,textAlign:"center",animation:rb===a?"pulse 1s infinite":"none"}}>{rb===a?"...":kl(b.key,b.ctrl)}</button></div>))}<button onClick={()=>sKb(DK)} style={{marginTop:8,padding:"6px 14px",borderRadius:8,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:11,fontWeight:600,cursor:"pointer"}}>Reset</button></S>
-    <S title="Updates"><Tog label="Check for updates automatically" value={st.autoUpdate!==false} onChange={v=>upd(p=>({...p,autoUpdate:v}))}/><Row label="Check for updates"><div style={{display:"flex",alignItems:"center",gap:8}}><button onClick={()=>{sUpdChk("checking");if(window.hopeUpdater)window.hopeUpdater.check().then(r=>{sUpdChk(r.ok&&r.version?"available":"up-to-date");}).catch(()=>sUpdChk("error"));else sUpdChk("error");}} style={{padding:"5px 14px",borderRadius:7,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tD,fontSize:11,fontWeight:600,cursor:"pointer"}}>Check Now</button>{updChk&&<span style={{fontSize:11,color:updChk==="available"?"#a78bfa":updChk==="up-to-date"?"#34d399":"#f87171",fontWeight:600}}>{updChk==="checking"?"Checking...":updChk==="available"?"Update available":updChk==="up-to-date"?"Up to date":"Check failed"}</span>}</div></Row><Row label="Current version"><span style={{fontSize:12,color:t.tM,fontFamily:"'JetBrains Mono',monospace"}}>{av||"1.0.0"}</span></Row></S>
+    <S title="Updates"><Tog label="Check for updates automatically" value={st.autoUpdate!==false} onChange={v=>{upd(p=>({...p,autoUpdate:v}));if(window.hopeUpdater&&window.hopeUpdater.setAuto)window.hopeUpdater.setAuto(v);}}/><Row label="Check for updates"><div style={{display:"flex",alignItems:"center",gap:8}}><button onClick={()=>{sUpdChk("checking");if(window.hopeUpdater)window.hopeUpdater.check().then(r=>{sUpdChk(r.ok&&r.version?"available":"up-to-date");}).catch(()=>sUpdChk("error"));else sUpdChk("error");}} style={{padding:"5px 14px",borderRadius:7,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tD,fontSize:11,fontWeight:600,cursor:"pointer"}}>Check Now</button>{updChk&&<span style={{fontSize:11,color:updChk==="available"?"#a78bfa":updChk==="up-to-date"?"#34d399":"#f87171",fontWeight:600}}>{updChk==="checking"?"Checking...":updChk==="available"?"Update available":updChk==="up-to-date"?"Up to date":"Check failed"}</span>}</div></Row><Row label="Current version"><span style={{fontSize:12,color:t.tM,fontFamily:"'JetBrains Mono',monospace"}}>{av||"1.0.0"}</span></Row></S>
     <S title="Account"><Row label="Username"><span style={{fontSize:13,color:t.tM,fontFamily:"'JetBrains Mono',monospace"}}>{us?.name}</span></Row><Row label="Role"><span style={{fontSize:12,color:"#a78bfa",fontWeight:600,textTransform:"capitalize"}}>{us?.role}</span></Row></S>
     <S title="About">{[{l:"App",v:"H.O.P.E."},{l:"Ver",v:av||"1.0.0"},{l:"By",v:"Sovalius Corporation"}].map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0"}}><span style={{fontSize:12,color:t.tD}}>{r.l}</span><span style={{fontSize:12,fontWeight:600,color:t.tM}}>{r.v}</span></div>))}</S>
   </div>);
@@ -825,7 +838,6 @@ function Settings({settings:st,setSettings:sS,user:us,theme:th,setTheme:sTh,keyb
 function Configure({user}){
   const t=T[useContext(ThC)];const s=sc(useContext(StC).fontSize);
   const[tab,sTab]=useState("cameras");
-  const[editCam,sEditCam]=useState(null);
   const[feeds,sFeeds]=useState([]);
   const isEl=typeof window!=="undefined"&&window.hopeDb;
   useEffect(()=>{
@@ -840,95 +852,16 @@ function Configure({user}){
     pull();const i=setInterval(pull,10000);return()=>clearInterval(i);
   },[isEl]);
   const cams=feeds;
-  const[requests,sRequests]=useState([
-    {id:"SVT-2026-0042",reqType:"new_camera",location:"Dorsetshire Hill",justification:"School zone, frequent speeding reports from officers",priority:"high",by:"Sgt. Williams",submittedAt:"2026-03-18T10:00:00",
-      stages:[{s:"submitted",at:"2026-03-18T10:00:00"},{s:"under_review",at:"2026-03-18T14:30:00"},{s:"site_survey",at:"2026-03-19T09:00:00",note:"Sovalius technician scheduled for site visit"}],currentStage:"site_survey"},
-    {id:"SVT-2026-0038",reqType:"new_camera",location:"Murray Road, Cane Garden",justification:"Blind corner, multiple accident reports",priority:"medium",by:"Cpl. James",submittedAt:"2026-03-10T08:00:00",
-      stages:[{s:"submitted",at:"2026-03-10T08:00:00"},{s:"under_review",at:"2026-03-10T16:00:00"},{s:"site_survey",at:"2026-03-12T10:00:00"},{s:"approved",at:"2026-03-14T11:00:00",note:"Approved — CAM-CG-01 allocated"},{s:"installation",at:"2026-03-17T08:00:00",note:"Installation in progress"}],currentStage:"installation"},
-    {id:"SVT-2026-0045",reqType:"ext_stream",location:"Ministry of Finance, Kingstown",owner:"Government of SVG — CCTV Division",streamInfo:"rtsp://10.0.1.50:554/cam3 · 1080p · H.264, fixed angle, covers Halifax St intersection",justification:"Government already has CCTV covering Halifax St intersection — high violation area. Connecting this feed avoids installing a new camera.",priority:"medium",by:"Sgt. Williams",submittedAt:"2026-03-19T14:00:00",
-      stages:[{s:"submitted",at:"2026-03-19T14:00:00"},{s:"under_review",at:"2026-03-20T09:00:00",note:"Sovalius confirming stream access with SVG IT department"}],currentStage:"under_review"},
-  ]);
-  const[showReq,sShowReq]=useState(false);
-  const[confirmMsg,sConfirmMsg]=useState(null);
-  const laneCams=cams.map(c=>({id:c.id,name:c.name||c.id}));
-
-  // Edit camera modal
-  const EditModal=()=>{
-    const[loc,sLoc]=useState(editCam?.location||"");const[gLat,sGLat]=useState("13.15");const[gLng,sGLng]=useState("-61.22");
-    return(<div style={{position:"fixed",inset:0,zIndex:9998,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>sEditCam(null)}>
-      <div onClick={e=>e.stopPropagation()} style={{background:t.fD,border:`1px solid ${t.fDB}`,borderRadius:16,padding:"24px 28px",width:420}}>
-        <h3 style={{margin:"0 0 18px",fontSize:16,fontWeight:800,color:t.tx}}>Edit Camera — {editCam?.id}</h3>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Location</label><input value={loc} onChange={e=>sLoc(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Latitude</label><input value={gLat} onChange={e=>sGLat(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,outline:"none",boxSizing:"border-box",fontFamily:"'JetBrains Mono',monospace"}}/></div>
-            <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Longitude</label><input value={gLng} onChange={e=>sGLng(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,outline:"none",boxSizing:"border-box",fontFamily:"'JetBrains Mono',monospace"}}/></div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-          <button onClick={()=>sEditCam(null)} style={{padding:"9px 20px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
-          <button onClick={()=>{sFeeds(p=>p.map(c=>c.id===editCam.id?{...c,location:loc}:c));sEditCam(null);}} style={{padding:"9px 20px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Save</button>
-        </div>
-      </div>
-    </div>);
-  };
-
-  // Request modal — dual type: new camera or external stream
-  const ReqModal=()=>{
-    const[rType,sRType]=useState("new_camera");
-    const[loc,sLoc]=useState("");const[just,sJust]=useState("");const[pri,sPri]=useState("medium");const[area,sArea]=useState("");
-    // External stream fields
-    const[owner,sOwner]=useState("");const[streamInfo,sStreamInfo]=useState("");const[streamUrl,sStreamUrl]=useState("");const[resolution,sResolution]=useState("1080p");
-    const isNew=rType==="new_camera";
-    const canSubmit=isNew?(loc.trim()&&just.trim()):( loc.trim()&&owner.trim()&&just.trim());
-    const submit=()=>{if(!canSubmit)return;const ticketId=`SVT-2026-${String(Math.floor(Math.random()*9000)+1000)}`;const base={id:ticketId,reqType:rType,location:`${loc}${area?", "+area:""}`,justification:just,priority:pri,by:user?.name||"Officer",submittedAt:new Date().toISOString(),stages:[{s:"submitted",at:new Date().toISOString()}],currentStage:"submitted"};if(!isNew){base.owner=owner;base.streamInfo=`${streamUrl?streamUrl+" · ":""}${resolution}${streamInfo?" · "+streamInfo:""}`;} sRequests(p=>[base,...p]);sShowReq(false);sConfirmMsg(ticketId);setTimeout(()=>sConfirmMsg(null),5000);};
-    const inp=(l,v,sv,ph,extra={})=>(<div {...extra}><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>{l}</label><input value={v} onChange={e=>sv(e.target.value)} placeholder={ph} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,outline:"none",boxSizing:"border-box"}}/></div>);
-    return(<div style={{position:"fixed",inset:0,zIndex:9998,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>sShowReq(false)}>
-      <div onClick={e=>e.stopPropagation()} style={{background:t.fD,border:`1px solid ${t.fDB}`,borderRadius:16,padding:"24px 28px",width:480,maxHeight:"85vh",overflowY:"auto"}}>
-        <h3 style={{margin:"0 0 4px",fontSize:16,fontWeight:800,color:t.tx}}>Camera Request</h3>
-        <p style={{margin:"0 0 16px",fontSize:11,color:t.tD}}>Submit to Sovalius Corporation for processing</p>
-        {/* Type selector */}
-        <div style={{display:"flex",gap:6,marginBottom:18}}>
-          {[{k:"new_camera",l:"New H.O.P.E. Camera",d:"Request Sovalius to install a new camera"},{k:"ext_stream",l:"Add Existing Stream",d:"Connect a government or third-party CCTV feed"}].map(x=>(<button key={x.k} onClick={()=>sRType(x.k)} style={{flex:1,padding:"12px 14px",borderRadius:12,border:`1px solid ${rType===x.k?"rgba(167,139,250,.4)":t.iBo}`,background:rType===x.k?"rgba(167,139,250,.1)":t.iB,cursor:"pointer",textAlign:"left"}}>
-            <p style={{margin:0,fontSize:12,fontWeight:700,color:rType===x.k?"#a78bfa":t.tx}}>{x.l}</p>
-            <p style={{margin:"3px 0 0",fontSize:10,color:t.tD}}>{x.d}</p>
-          </button>))}
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          {inp("Location",loc,sLoc,isNew?"e.g. Dorsetshire Hill, near school":"e.g. Ministry of Finance, Halifax St — existing camera location")}
-          {inp("Area / Parish",area,sArea,"e.g. Kingstown, St. George")}
-          {/* Existing stream specific fields */}
-          {!isNew&&<>
-            {inp("Stream Owner",owner,sOwner,"e.g. Government of SVG, Port Authority, GraceKennedy")}
-            {inp("Stream URL / Access Details",streamUrl,sStreamUrl,"e.g. rtsp://10.0.1.50:554/cam3 or contact details for IT dept")}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Resolution</label><div style={{display:"flex",gap:4}}>{["720p","1080p","4K"].map(r=>(<button key={r} onClick={()=>sResolution(r)} style={{padding:"5px 12px",borderRadius:7,border:`1px solid ${resolution===r?"rgba(167,139,250,.3)":t.iBo}`,background:resolution===r?"rgba(167,139,250,.15)":t.iB,color:resolution===r?"#a78bfa":t.tD,fontSize:11,fontWeight:600,cursor:"pointer"}}>{r}</button>))}</div></div>
-              {inp("Stream Details",streamInfo,sStreamInfo,"e.g. H.264 codec, fixed angle, covers intersection")}
-            </div>
-          </>}
-          <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Justification</label><textarea value={just} onChange={e=>sJust(e.target.value)} rows={3} placeholder={isNew?"Why is this camera needed? (incident history, safety concerns)":"Why should this stream be connected to H.O.P.E.? (coverage area, known violation hotspot)"} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical",fontFamily:"'Inter',sans-serif"}}/></div>
-          <div><label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,display:"block",marginBottom:6,fontWeight:600}}>Priority</label><div style={{display:"flex",gap:6}}>{["low","medium","high","critical"].map(p=>(<button key={p} onClick={()=>sPri(p)} style={{padding:"6px 14px",borderRadius:8,border:`1px solid ${pri===p?"rgba(167,139,250,.3)":t.iBo}`,background:pri===p?"rgba(167,139,250,.15)":t.iB,color:pri===p?"#a78bfa":t.tD,fontSize:11,fontWeight:600,cursor:"pointer",textTransform:"capitalize"}}>{p}</button>))}</div></div>
-        </div>
-        <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-          <button onClick={()=>sShowReq(false)} style={{padding:"9px 20px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancel</button>
-          <button onClick={submit} disabled={!canSubmit} style={{padding:"9px 20px",borderRadius:10,border:"none",background:canSubmit?"linear-gradient(135deg,#6366f1,#8b5cf6)":"rgba(128,128,128,.2)",color:canSubmit?"#fff":"rgba(255,255,255,.3)",fontSize:13,fontWeight:700,cursor:canSubmit?"pointer":"not-allowed"}}>Submit to Sovalius</button>
-        </div>
-      </div>
-    </div>);
-  };
-
-  const priC={low:"#60a5fa",medium:"#f59e0b",high:"#f87171",critical:"#ef4444"};
-  const newCamStages=["submitted","under_review","site_survey","approved","denied","installation","live"];
-  const extStreamStages=["submitted","under_review","compatibility","approved","denied","integration","live"];
-  const stageLabels={submitted:"Submitted",under_review:"Under Review",site_survey:"Site Survey",compatibility:"Stream Check",approved:"Approved",denied:"Denied",installation:"Installation",integration:"Integration",live:"Live"};
-  const stageColors={submitted:"#a78bfa",under_review:"#60a5fa",site_survey:"#f59e0b",compatibility:"#f59e0b",approved:"#34d399",denied:"#f87171",installation:"#818cf8",integration:"#818cf8",live:"#34d399"};
-  const reqTypeLabels={new_camera:"New Camera",ext_stream:"Existing Stream"};
-  const reqTypeColors={new_camera:"#a78bfa",ext_stream:"#60a5fa"};
+  // NOTE — removed with the prototype purge: a hard-coded list of "Sovalius
+  // camera requests" (including a real-looking internal RTSP address), the
+  // request-submission modal, and an Edit Camera modal. None of them talked to
+  // any API: submitting a request only pushed a row into local React state and
+  // "saving" a camera only rewrote a field that the 10s feed poll overwrote
+  // moments later. They rendered as live operational records. There is no
+  // camera-request backend, so the surface is gone rather than faked; the
+  // feed list below and the lane editor are real.
 
   return(<div>
-    {editCam&&<EditModal/>}{showReq&&<ReqModal/>}
-    {/* Confirmation toast */}
-    {confirmMsg&&<div style={{position:"fixed",top:70,left:"50%",transform:"translateX(-50%)",zIndex:9999,padding:"12px 24px",borderRadius:12,background:"rgba(52,211,153,.15)",border:"1px solid rgba(52,211,153,.3)",color:"#34d399",fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 30px rgba(0,0,0,.3)"}}><span style={{fontSize:16}}>✓</span> Request {confirmMsg} submitted to Sovalius Corporation</div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
       <h2 style={{fontSize:20*s,fontWeight:800,color:t.tx,margin:0}}>Configure</h2>
       <div style={{display:"flex",gap:4}}>{[{k:"cameras",l:"Camera Management"},{k:"lanes",l:"Lane Drawing"}].map(x=>(<button key={x.k} onClick={()=>sTab(x.k)} style={{padding:"8px 18px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:tab===x.k?"rgba(167,139,250,.15)":"transparent",color:tab===x.k?"#a78bfa":t.tD}}>{x.l}</button>))}</div>
@@ -938,7 +871,6 @@ function Configure({user}){
       <Glass style={{overflow:"hidden",marginBottom:16}}>
         <div style={{padding:"14px 18px",borderBottom:`1px solid ${t.dv}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <h3 style={{margin:0,fontSize:14*s,fontWeight:700,color:t.tx}}>Feeds ({cams.length})</h3>
-          <button onClick={()=>sShowReq(true)} style={{padding:"7px 16px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Request Camera</button>
         </div>
         {cams.length===0?<div style={{padding:"40px 20px",textAlign:"center"}}><p style={{fontSize:13,color:t.tD,margin:0}}>No feeds registered</p><p style={{fontSize:11,color:t.tF,margin:"4px 0 0"}}>Feeds will appear when H.O.P.E. is running</p></div>:cams.map(c=>{
           const statC={online:"#34d399",offline:"#f87171",degraded:"#f59e0b"};
@@ -960,62 +892,6 @@ function Configure({user}){
         })}
       </Glass>
 
-      {/* Sovalius Request Tracker */}
-      <Glass style={{overflow:"hidden"}}>
-        <div style={{padding:"14px 18px",borderBottom:`1px solid ${t.dv}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>
-            <h3 style={{margin:0,fontSize:14*s,fontWeight:700,color:t.tx}}>Sovalius Camera Requests</h3>
-            <p style={{margin:"2px 0 0",fontSize:10,color:t.tD}}>Requests are processed by Sovalius Corporation</p>
-          </div>
-          <span style={{fontSize:11,color:t.tF,fontFamily:"'JetBrains Mono',monospace"}}>{requests.length} request{requests.length!==1?"s":""}</span>
-        </div>
-        {requests.length===0&&<p style={{padding:20,textAlign:"center",color:t.tF,fontSize:13}}>No requests submitted</p>}
-        {requests.map(r=>{
-          const stageOrder=r.reqType==="ext_stream"?extStreamStages:newCamStages;
-          const activeIdx=stageOrder.indexOf(r.currentStage);
-          const isDenied=r.currentStage==="denied";
-          const pipeline=isDenied?stageOrder.slice(0,4).concat(["denied"]):stageOrder.filter(s=>s!=="denied");
-          return(<div key={r.id} style={{padding:"16px 18px",borderBottom:`1px solid ${t.dv}`}}>
-            {/* Header */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:13,fontWeight:700,color:"#a78bfa",fontFamily:"'JetBrains Mono',monospace"}}>{r.id}</span>
-                <span style={{fontSize:9,padding:"2px 8px",borderRadius:5,fontWeight:700,background:`${reqTypeColors[r.reqType]}15`,color:reqTypeColors[r.reqType],textTransform:"uppercase",border:`1px solid ${reqTypeColors[r.reqType]}25`}}>{reqTypeLabels[r.reqType]}</span>
-                <span style={{fontSize:9,padding:"2px 8px",borderRadius:5,fontWeight:700,background:`${priC[r.priority]}15`,color:priC[r.priority],textTransform:"uppercase"}}>{r.priority}</span>
-              </div>
-              <span style={{fontSize:10,color:t.tF}}>by {r.by} · {tS(r.submittedAt)}</span>
-            </div>
-            {/* Location + justification */}
-            <p style={{margin:"0 0 4px",fontSize:13,fontWeight:600,color:t.tx}}>{r.location}</p>
-            {r.owner&&<p style={{margin:"0 0 4px",fontSize:11,color:t.tM}}>Owner: {r.owner}{r.streamInfo&&<span style={{color:t.tD,marginLeft:8,fontFamily:"'JetBrains Mono',monospace",fontSize:10}}>{r.streamInfo}</span>}</p>}
-            <p style={{margin:"0 0 14px",fontSize:11,color:t.tD,lineHeight:1.5}}>{r.justification}</p>
-            {/* Pipeline stages */}
-            <div style={{display:"flex",alignItems:"center",gap:0,marginBottom:8}}>
-              {pipeline.map((stage,i)=>{
-                const reached=stageOrder.indexOf(stage)<=activeIdx;
-                const isCurrent=stage===r.currentStage;
-                return(<div key={stage} style={{display:"flex",alignItems:"center",flex:i<pipeline.length-1?1:"none"}}>
-                  <div style={{display:"flex",flexDirection:"column",alignItems:"center",position:"relative"}}>
-                    <div style={{width:isCurrent?24:16,height:isCurrent?24:16,borderRadius:12,background:reached?stageColors[stage]:"transparent",border:`2px solid ${reached?stageColors[stage]:t.iBo}`,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .3s"}}>
-                      {reached&&<span style={{color:"#fff",fontSize:isCurrent?10:7,fontWeight:800}}>{stage==="approved"||stage==="live"?"✓":stage==="denied"?"✕":"•"}</span>}
-                    </div>
-                    <span style={{fontSize:8,color:isCurrent?stageColors[stage]:reached?t.tM:t.tF,fontWeight:isCurrent?700:500,marginTop:4,whiteSpace:"nowrap",textTransform:"uppercase",letterSpacing:.5}}>{stageLabels[stage]}</span>
-                  </div>
-                  {i<pipeline.length-1&&<div style={{flex:1,height:2,background:reached&&stageOrder.indexOf(pipeline[i+1])<=activeIdx?stageColors[stage]:t.iBo,margin:"0 4px 16px",borderRadius:1,minWidth:12}}/>}
-                </div>);
-              })}
-            </div>
-            {/* Stage notes */}
-            {r.stages.filter(st=>st.note).length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${t.dv}`}}>
-              {r.stages.filter(st=>st.note).map((st,i)=>(<div key={i} style={{display:"flex",gap:8,alignItems:"baseline",marginBottom:4}}>
-                <span style={{fontSize:9,color:stageColors[st.s],fontWeight:700,textTransform:"uppercase",flexShrink:0}}>{stageLabels[st.s]}</span>
-                <span style={{fontSize:11,color:t.tM,fontStyle:"italic"}}>{st.note}</span>
-                <span style={{fontSize:9,color:t.tF,marginLeft:"auto",flexShrink:0}}>{fT(st.at,"24h")}</span>
-              </div>))}
-            </div>}
-          </div>);
-        })}
-      </Glass>
     </div>}
 
     {tab==="lanes"&&<LaneConfigTab cameras={laneCams} theme={t}/>}
@@ -1105,6 +981,15 @@ export default function App(){
     // Re-pull the tamper-evident audit chain the SERVER wrote (the client
     // never invents audit rows).
     db.refreshAll();
+    // Settings > Review > Auto-advance. Previously stored and never read.
+    // Only ever runs after the gateway CONFIRMED the decision.
+    if(st.autoAdvance&&sel){
+      const i=vs.findIndex(v=>v.id===id);
+      const next=(i>=0?vs.slice(i+1):[]).find(v=>v.status==="pending")
+        ||vs.find(v=>v.status==="pending"&&v.id!==id)||null;
+      // Brief pause so the reviewer sees the decision register before moving.
+      setTimeout(()=>{sSel(next);},700);
+    }
     return{ok:true};
   };
   const pin=async id=>{

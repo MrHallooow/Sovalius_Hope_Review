@@ -369,6 +369,18 @@ function checkForUpdateOnSplash() {
   });
 }
 
+// The renderer's "Check for updates automatically" toggle. It used to control
+// nothing: the background check ran on a fixed interval regardless. Now it
+// gates the recurring check (the ONE startup check before any user has signed
+// in still runs — that is what keeps a stale desk patchable).
+let autoUpdateEnabled = true;
+
+ipcMain.handle("updater:set-auto", (_event, enabled) => {
+  autoUpdateEnabled = enabled !== false;
+  autoUpdater.autoDownload = autoUpdateEnabled;
+  return { ok: true, enabled: autoUpdateEnabled };
+});
+
 ipcMain.handle("updater:check", async () => {
   try {
     const result = await autoUpdater.checkForUpdates();
@@ -409,6 +421,7 @@ app.whenReady().then(async () => {
 
   if (app.isPackaged) {
     setInterval(() => {
+      if (!autoUpdateEnabled) return;
       autoUpdater.checkForUpdates().catch(() => {});
     }, 5 * 60 * 1000);
   }

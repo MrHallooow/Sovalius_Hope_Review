@@ -575,14 +575,20 @@ def test_notification_mark_read_and_unread():
 
 def test_notifications_mark_all_read():
     h = _auth("officer")
+    # Read state is PER USER, so "unread" means unread BY THIS USER — not the
+    # legacy global notifications.read column. mark-all-read covers EVERY
+    # notification, not just the 50-row window GET /notifications returns.
     db = SessionLocal()
     try:
-        unread_before = (db.query(models.Notification)
-                         .filter(models.Notification.read == False)  # noqa: E712
-                         .count())
+        uid = db.query(models.User).filter(models.User.username == "officer").one().id
+        total = db.query(models.Notification).count()
+        already = (db.query(models.NotificationRead)
+                   .filter(models.NotificationRead.user_id == uid)
+                   .count())
     finally:
         db.close()
-    assert unread_before > 0  # prior tests left unread rows
+    unread_before = total - already
+    assert unread_before > 0  # prior tests left rows this user has not read
 
     seq_before = _audit_head_seq()
     r = client.post("/notifications/mark-all-read", headers=h)
@@ -596,3 +602,39 @@ def test_notifications_mark_all_read():
     assert again.json()["updated"] == 0
     # Inbox housekeeping is deliberately NOT audited.
     assert _audit_head_seq() == seq_before
+
+
+def test_notification_read_state_is_per_user():
+    """One reviewer opening a notification must not hide it from another.
+
+    The notifications table has a single global `read` column; read state is
+    tracked per (notification, user) instead.
+    """
+    db = SessionLocal()
+    try:
+        n = models.Notification(type="info", msg="per-user read isolation probe")
+        db.add(n)
+        db.commit()
+        nid = n.id
+    finally:
+        db.close()
+
+    officer = _auth("officer")
+    supervisor = _auth("supervisor")
+
+    def _seen(headers) -> bool | None:
+        for row in client.get("/notifications", headers=headers).json()["rows"]:
+            if row["id"] == nid:
+                return row["read"]
+        return None
+
+    assert _seen(officer) is False
+    assert _seen(supervisor) is False
+
+    assert client.patch(f"/notifications/{nid}", headers=officer).status_code == 200
+    assert _seen(officer) is True
+    assert _seen(supervisor) is False, "another reviewer's inbox was silently marked read"
+
+    # ...and marking everything read for one user leaves the other untouched.
+    client.post("/notifications/mark-all-read", headers=officer)
+    assert _seen(supervisor) is False

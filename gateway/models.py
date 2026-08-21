@@ -218,6 +218,26 @@ class Notification(Base):
     read: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class NotificationRead(Base):
+    """PER-USER read state for a broadcast notification.
+
+    ``notifications.read`` is a single global flag: one reviewer marking a
+    notification read hid it from every other reviewer on every desk. Read
+    state is a property of (notification, user), so it lives here. The legacy
+    column is left in place for older rows/tools but is no longer what the
+    API reports.
+    """
+
+    __tablename__ = "notification_reads"
+    notification_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("notifications.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Service(Base):
     __tablename__ = "services"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
