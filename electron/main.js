@@ -54,14 +54,17 @@ gateway.init(process.env.GATEWAY_URL);
 
 function cspFor(gatewayOrigin) {
   const gw = gatewayOrigin ? ` ${gatewayOrigin}` : "";
+  // `file:` is listed explicitly alongside 'self': the packaged renderer is
+  // loaded with loadFile(), and Chromium does not reliably match 'self'
+  // against a file:// document — without it the packaged window renders blank.
   return [
     "default-src 'none'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' data: https://fonts.gstatic.com",
-    `img-src 'self' data: blob:${gw}`,
-    `media-src 'self' blob:${gw}`,
-    `connect-src 'self'${gw} https://fonts.googleapis.com`,
+    "script-src 'self' file:",
+    "style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' file: data: https://fonts.gstatic.com",
+    `img-src 'self' file: data: blob:${gw}`,
+    `media-src 'self' file: blob:${gw}`,
+    `connect-src 'self' file:${gw} https://fonts.googleapis.com`,
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
