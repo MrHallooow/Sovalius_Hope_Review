@@ -79,6 +79,14 @@ ipcMain.handle("db:test-connection", async () => {
   return gateway.testConnection();
 });
 
+ipcMain.handle("system:gateway-health", async () => {
+  // Pre-login readiness for the splash screen. Unlike db:test-connection this
+  // does NOT wait for a login — the splash must report what is actually true
+  // before anyone has signed in.
+  const r = await gateway.testConnection();
+  return { ...r, url: gateway.getBaseUrl() };
+});
+
 ipcMain.handle("db:query", async () => {
   // Raw SQL from the renderer is retired with the direct-PG model — the
   // gateway API is the only data path. (src/ never invoked this channel.)
@@ -176,6 +184,14 @@ ipcMain.handle("auth:login", async (_event, username, password) => {
   // Tokens live in gatewayClient (main-process memory ONLY) — the renderer
   // receives the legacy {ok, user} shape with no token material.
   return gateway.login(username, password);
+});
+
+ipcMain.handle("auth:logout", async () => {
+  // Sign-out must END the desk session, not just repaint the renderer:
+  // revoke the refresh-token family server-side and drop the main-process
+  // tokens, so the next user of this desk cannot inherit the previous
+  // reviewer's data or authority.
+  return gateway.logout();
 });
 
 ipcMain.handle("auth:register", async (_event, userData) => {

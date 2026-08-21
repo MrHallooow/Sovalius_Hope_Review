@@ -249,10 +249,28 @@ function SystemStatus(){
 function AuditLog({auditLog}){
   const t=T[useContext(ThC)];const s=sc(useContext(StC).fontSize);
   const[search,sSearch]=useState("");const[actFilter,sActFilter]=useState("all");const[offFilter,sOffFilter]=useState("all");
-  const actionC={approved:"#34d399",dismissed:"#f87171",viewed:"#60a5fa",flagged:"#a78bfa",revised:"#f59e0b",undone:"#f87171"};
+  // The gateway's ACTUAL audit vocabulary (gateway/audit.py _PREFIX). The old
+  // list here filtered on renderer-invented names like "approved"/"revised",
+  // which match nothing the server ever writes — so those filters silently
+  // returned an empty log.
+  const ACTIONS=[
+    {k:"review_approved",l:"Approved",c:"#34d399"},
+    {k:"review_dismissed",l:"Dismissed",c:"#f87171"},
+    {k:"review_reopened",l:"Reopened",c:"#f59e0b"},
+    {k:"review_notes",l:"Notes edited",c:"#a78bfa"},
+    {k:"pinned",l:"Pinned",c:"#a78bfa"},
+    {k:"evidence_accessed",l:"Evidence viewed",c:"#60a5fa"},
+    {k:"violation_viewed",l:"Case viewed",c:"#60a5fa"},
+    {k:"login",l:"Sign-in",c:"#60a5fa"},
+    {k:"user_admin",l:"User admin",c:"#f59e0b"},
+    {k:"camera_change",l:"Camera change",c:"#f59e0b"},
+    {k:"service_change",l:"Service change",c:"#f59e0b"},
+  ];
+  const actionC=Object.fromEntries(ACTIONS.map(a=>[a.k,a.c]));
+  const actionL=Object.fromEntries(ACTIONS.map(a=>[a.k,a.l]));
   const officers=[...new Set(auditLog.map(l=>l.officer))];
   let filtered=[...auditLog];
-  if(search){const q=search.toLowerCase();filtered=filtered.filter(l=>l.violationId.toLowerCase().includes(q)||l.officer.toLowerCase().includes(q)||l.notes.toLowerCase().includes(q));}
+  if(search){const q=search.toLowerCase();filtered=filtered.filter(l=>(l.violationId||"").toLowerCase().includes(q)||(l.officer||"").toLowerCase().includes(q)||(l.notes||"").toLowerCase().includes(q));}
   if(actFilter!=="all")filtered=filtered.filter(l=>l.action===actFilter);
   if(offFilter!=="all")filtered=filtered.filter(l=>l.officer===offFilter);
   filtered.sort((a,b)=>new Date(b.at)-new Date(a.at));
@@ -261,12 +279,12 @@ function AuditLog({auditLog}){
     <Glass style={{overflow:"hidden"}}>
       <div style={{padding:"12px 18px",display:"flex",gap:8,alignItems:"center",borderBottom:`1px solid ${t.dv}`}}>
         <div style={{flex:1,position:"relative"}}><input value={search} onChange={e=>sSearch(e.target.value)} placeholder="Search violations, officers..." style={{width:"100%",padding:"7px 10px 7px 28px",borderRadius:8,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:12,outline:"none",boxSizing:"border-box"}}/><span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:t.tF,pointerEvents:"none"}}>⌕</span></div>
-        <Sel value={actFilter} onChange={e=>sActFilter(e.target.value)} options={[{k:"all",l:"All actions"},{k:"approved",l:"Approved"},{k:"dismissed",l:"Dismissed"},{k:"viewed",l:"Viewed"},{k:"flagged",l:"Flagged"},{k:"revised",l:"Revised"}]}/>
+        <Sel value={actFilter} onChange={e=>sActFilter(e.target.value)} options={[{k:"all",l:"All actions"},...ACTIONS.map(a=>({k:a.k,l:a.l}))]}/>
         <Sel value={offFilter} onChange={e=>sOffFilter(e.target.value)} options={[{k:"all",l:"All officers"},...officers.map(o=>({k:o,l:o}))]}/>
       </div>
       <div style={{maxHeight:500,overflowY:"auto"}}>
         {filtered.map(l=>(<div key={l.id} style={{padding:"10px 18px",borderBottom:`1px solid ${t.dv}`,display:"flex",alignItems:"center",gap:12}}>
-          <span style={{fontSize:10,fontWeight:700,color:actionC[l.action]||t.tx,textTransform:"uppercase",width:70,flexShrink:0}}>{l.action}</span>
+          <span title={l.action} style={{fontSize:10,fontWeight:700,color:actionC[l.action]||t.tx,textTransform:"uppercase",width:110,flexShrink:0}}>{actionL[l.action]||l.action}</span>
           <span style={{fontSize:12,fontWeight:700,color:t.tx,fontFamily:"'JetBrains Mono',monospace",width:140,flexShrink:0}}>{l.violationId}</span>
           <span style={{fontSize:12,color:t.tM,flex:1}}>{l.officer}</span>
           {l.notes&&<span style={{fontSize:11,color:t.tD,fontStyle:"italic",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>"{l.notes}"</span>}
@@ -414,11 +432,30 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
     // evidence can land (or be replaced) while a reviewer has the case open.
   },[v?.id,v?.remoteClipUrl,v?.remoteRawClipUrl,v?.remoteScreenshotUrl]);
 
+  // Swapping AI-annotated <-> RAW is a change of SOURCE for the same moment of
+  // the same incident, not a new clip: assigning src + load() rewinds to 0, so
+  // the reviewer lost their place every time they checked the raw footage.
+  // Keep the playhead across the swap and only start from 0 for a new case.
+  const lastSrc=useRef({id:null,url:null});
   useEffect(()=>{
     sVidErr(false);
     const el=vidRef.current;
-    if(el&&clipUrl){el.src=clipUrl;el.load();}
-  },[clipUrl]);
+    if(!el||!clipUrl)return;
+    if(lastSrc.current.url===clipUrl)return; // same source already loaded
+    const sameCase=lastSrc.current.id===(v?.id??null)&&!!lastSrc.current.url;
+    const resumeAt=sameCase&&Number.isFinite(el.currentTime)?el.currentTime:0;
+    lastSrc.current={id:v?.id??null,url:clipUrl};
+    const onMeta=()=>{
+      el.removeEventListener("loadedmetadata",onMeta);
+      if(resumeAt>0){
+        // Clamp: the raw and annotated encodes can differ by a frame or two.
+        try{el.currentTime=el.duration?Math.min(resumeAt,el.duration):resumeAt;}catch{/* not seekable yet */}
+      }
+    };
+    el.addEventListener("loadedmetadata",onMeta);
+    el.src=clipUrl;el.load();
+    return()=>el.removeEventListener("loadedmetadata",onMeta);
+  },[clipUrl,v?.id]);
 
   useEffect(()=>{
     const el=vidRef.current;if(!el||!clipUrl)return;
@@ -483,27 +520,51 @@ function VP({violation:v,onFullscreen:oFs,compact:cp=false,playing:pl,setPlaying
 
 /* ═══ SPLASH SCREEN ═══ */
 function SplashScreen({onDone}){
-  const[prog,sProg]=useState(0);const[status,sStatus]=useState("Initializing...");
-  const steps=[{at:10,msg:"Loading modules..."},{at:25,msg:"Connecting to server..."},{at:45,msg:"Authenticating session..."},{at:60,msg:"Syncing camera feeds..."},{at:75,msg:"Loading violation queue..."},{at:90,msg:"Starting H.O.P.E. engine..."},{at:100,msg:"Ready"}];
-  useEffect(()=>{const i=setInterval(()=>{sProg(p=>{if(p>=100){clearInterval(i);setTimeout(onDone,400);return 100;}const next=p+1+Math.random()*2;const step=steps.filter(s=>s.at<=next).pop();if(step)sStatus(step.msg);return Math.min(next,100);});},40);return()=>clearInterval(i);},[]);
+  // Honest boot state. The old splash animated a random progress bar through
+  // invented steps ("Authenticating session...", "Syncing camera feeds...")
+  // that corresponded to no actual work — it looked identical whether the
+  // gateway was up or down. This reports the ONE thing that is really checked
+  // before sign-in: can the desk reach the review gateway?
+  const[ver,sVer]=useState("");
+  const[st,sSt]=useState({phase:"probing",msg:"Contacting review gateway…",url:""});
+  const probe=useCallback(()=>{
+    sSt({phase:"probing",msg:"Contacting review gateway…",url:""});
+    if(typeof window==="undefined"||!window.hopeSystem){
+      sSt({phase:"error",msg:"Desktop bridge unavailable — run H.O.P.E. Review as the desktop app",url:""});
+      return;
+    }
+    window.hopeSystem.gatewayHealth().then(r=>{
+      if(r&&r.ok){sSt({phase:"ok",msg:"Review gateway ready",url:r.url||""});setTimeout(onDone,450);}
+      else sSt({phase:"error",msg:(r&&r.error)||"Review gateway unreachable",url:(r&&r.url)||""});
+    }).catch(e=>sSt({phase:"error",msg:String(e&&e.message||e),url:""}));
+  },[onDone]);
+  useEffect(()=>{
+    if(typeof window!=="undefined"&&window.hopeUpdater)window.hopeUpdater.getVersion().then(v=>{if(v)sVer(v);}).catch(()=>{});
+    probe();
+  },[probe]);
+  const bad=st.phase==="error";
   return(<div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#080b16",fontFamily:"'Inter',sans-serif"}}>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}} @keyframes glow{0%,100%{filter:drop-shadow(0 0 8px rgba(167,139,250,.3))}50%{filter:drop-shadow(0 0 20px rgba(167,139,250,.6))}}`}</style>
+    <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}} @keyframes indeterminate{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
     <div style={{animation:"fadeIn .8s ease-out",marginBottom:32}}>
       <SovFull height={60} color="#fff"/>
     </div>
     <h1 style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:6,margin:"0 0 6px",animation:"fadeIn .8s ease-out .2s both"}}>H.O.P.E.</h1>
     <p style={{fontSize:10,color:"rgba(255,255,255,.3)",letterSpacing:4,textTransform:"uppercase",margin:"0 0 40px",animation:"fadeIn .8s ease-out .4s both"}}>Help · Observe · Protect · Enforce</p>
-    <div style={{width:280,animation:"fadeIn .8s ease-out .6s both"}}>
+    <div style={{width:320,animation:"fadeIn .8s ease-out .6s both"}}>
       <div style={{height:3,borderRadius:10,background:"rgba(255,255,255,.06)",overflow:"hidden",marginBottom:12}}>
-        <div style={{width:`${prog}%`,height:"100%",borderRadius:10,background:"linear-gradient(90deg,#6366f1,#a78bfa)",transition:"width .1s"}}/>
+        {st.phase==="probing"
+          ?<div style={{width:"33%",height:"100%",borderRadius:10,background:"linear-gradient(90deg,#6366f1,#a78bfa)",animation:"indeterminate 1.1s ease-in-out infinite"}}/>
+          :<div style={{width:"100%",height:"100%",borderRadius:10,background:bad?"#f87171":"linear-gradient(90deg,#6366f1,#a78bfa)"}}/>}
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <p style={{fontSize:11,color:"rgba(255,255,255,.35)",margin:0}}>{status}</p>
-        <p style={{fontSize:10,color:"rgba(255,255,255,.2)",margin:0,fontFamily:"'JetBrains Mono',monospace"}}>{Math.floor(prog)}%</p>
-      </div>
+      <p style={{fontSize:11,color:bad?"#f87171":"rgba(255,255,255,.45)",margin:0,textAlign:"center"}}>{bad?"✕ ":st.phase==="ok"?"✓ ":""}{st.msg}</p>
+      {st.url&&<p style={{fontSize:10,color:"rgba(255,255,255,.2)",margin:"6px 0 0",textAlign:"center",fontFamily:"'JetBrains Mono',monospace"}}>{st.url}</p>}
+      {bad&&<div style={{display:"flex",gap:10,justifyContent:"center",marginTop:16}}>
+        <button onClick={probe} style={{padding:"7px 18px",borderRadius:9,border:"none",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Retry</button>
+        <button onClick={onDone} style={{padding:"7px 18px",borderRadius:9,border:"1px solid rgba(255,255,255,.12)",background:"transparent",color:"rgba(255,255,255,.5)",fontSize:12,fontWeight:600,cursor:"pointer"}}>Continue offline</button>
+      </div>}
     </div>
-    <p style={{position:"absolute",bottom:24,fontSize:9,color:"rgba(255,255,255,.15)",letterSpacing:2}}>SOVALIUS CORPORATION · v1.0.0</p>
+    <p style={{position:"absolute",bottom:24,fontSize:9,color:"rgba(255,255,255,.15)",letterSpacing:2}}>SOVALIUS CORPORATION{ver?` · v${ver}`:""}</p>
   </div>);
 }
 
@@ -551,27 +612,58 @@ function Login({onLogin:oL}){
         else{sE(res.error||"Login failed");sLoading(false);}
       }catch(err){sE("Connection error");sLoading(false);}
     }else{
-      setTimeout(()=>{oL({id:0,username:u,name:u,role:"officer",privileges:{canApprove:true,canDismiss:true,canRevise:false,canManageUsers:false,canManageCameras:false,canViewAudit:false,canExport:false}});},1500);
+      // NO fabricated session. The old branch accepted ANY username/password
+      // outside the desktop shell and minted a user holding canApprove /
+      // canDismiss — a review desk that looked real, on invented authority.
+      // The renderer only ever runs inside Electron in a real deployment.
+      sE("This build must run in the H.O.P.E. Review desktop app — no sign-in is available here.");
+      sLoading(false);
     }
   };
-  return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"radial-gradient(ellipse at 20% 50%,rgba(99,102,241,.15) 0%,transparent 50%),#080b16",fontFamily:"'Inter',sans-serif"}}><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style><div style={{width:400,padding:"44px 40px",background:"rgba(14,20,36,.9)",border:"1px solid rgba(255,255,255,.1)",borderRadius:16}}><div style={{textAlign:"center",marginBottom:36}}><div style={{margin:"0 auto 20px"}}><SovFull height={55} color="#fff"/></div><h1 style={{fontSize:26,fontWeight:800,color:"#fff",margin:"0 0 4px",letterSpacing:4}}>H.O.P.E.</h1><p style={{fontSize:10,color:"rgba(255,255,255,.35)",letterSpacing:3,textTransform:"uppercase",margin:"0 0 6px"}}>Help · Observe · Protect · Enforce</p></div><div style={{display:"flex",flexDirection:"column",gap:16}}>{[{l:"Username",v:u,s:sU,ty:"text"},{l:"Password",v:p,s:sP,ty:"password"}].map((fi,i)=>(<div key={i}><label style={{fontSize:10,color:"rgba(255,255,255,.4)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:7,display:"block",fontWeight:600}}>{fi.l}</label><input value={fi.v} onChange={ev=>fi.s(ev.target.value)} type={fi.ty} placeholder={fi.l} onKeyDown={ev=>ev.key==="Enter"&&!loading&&go()} disabled={loading} style={{width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid rgba(255,255,255,.08)",background:"rgba(255,255,255,.04)",color:"#fff",fontSize:14,outline:"none",boxSizing:"border-box",opacity:loading?.5:1}}/></div>))}{e&&<p style={{color:"#f87171",fontSize:12,margin:0,textAlign:"center"}}>{e}</p>}<button onClick={go} disabled={loading} style={{width:"100%",padding:"13px 0",borderRadius:12,border:"none",background:loading?"rgba(99,102,241,.5)":"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",letterSpacing:2,textTransform:"uppercase",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>{loading&&<div style={{width:16,height:16,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .6s linear infinite"}}/>}{loading?"Authenticating...":"Sign In"}</button></div>{!isElectron&&<p style={{textAlign:"center",fontSize:9,color:"rgba(245,158,11,.5)",marginTop:16,marginBottom:0}}>Demo mode — no database</p>}<p style={{textAlign:"center",fontSize:10,color:"rgba(255,255,255,.2)",marginTop:isElectron?24:8,letterSpacing:1.5,marginBottom:0}}>Sovalius Corporation · Per aspera ad astra</p></div></div>);
+  return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"radial-gradient(ellipse at 20% 50%,rgba(99,102,241,.15) 0%,transparent 50%),#080b16",fontFamily:"'Inter',sans-serif"}}><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style><div style={{width:400,padding:"44px 40px",background:"rgba(14,20,36,.9)",border:"1px solid rgba(255,255,255,.1)",borderRadius:16}}><div style={{textAlign:"center",marginBottom:36}}><div style={{margin:"0 auto 20px"}}><SovFull height={55} color="#fff"/></div><h1 style={{fontSize:26,fontWeight:800,color:"#fff",margin:"0 0 4px",letterSpacing:4}}>H.O.P.E.</h1><p style={{fontSize:10,color:"rgba(255,255,255,.35)",letterSpacing:3,textTransform:"uppercase",margin:"0 0 6px"}}>Help · Observe · Protect · Enforce</p></div><div style={{display:"flex",flexDirection:"column",gap:16}}>{[{l:"Username",v:u,s:sU,ty:"text"},{l:"Password",v:p,s:sP,ty:"password"}].map((fi,i)=>(<div key={i}><label style={{fontSize:10,color:"rgba(255,255,255,.4)",textTransform:"uppercase",letterSpacing:1.5,marginBottom:7,display:"block",fontWeight:600}}>{fi.l}</label><input value={fi.v} onChange={ev=>fi.s(ev.target.value)} type={fi.ty} placeholder={fi.l} onKeyDown={ev=>ev.key==="Enter"&&!loading&&go()} disabled={loading} style={{width:"100%",padding:"12px 16px",borderRadius:12,border:"1px solid rgba(255,255,255,.08)",background:"rgba(255,255,255,.04)",color:"#fff",fontSize:14,outline:"none",boxSizing:"border-box",opacity:loading?.5:1}}/></div>))}{e&&<p style={{color:"#f87171",fontSize:12,margin:0,textAlign:"center"}}>{e}</p>}<button onClick={go} disabled={loading} style={{width:"100%",padding:"13px 0",borderRadius:12,border:"none",background:loading?"rgba(99,102,241,.5)":"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",letterSpacing:2,textTransform:"uppercase",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>{loading&&<div style={{width:16,height:16,border:"2px solid rgba(255,255,255,.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin .6s linear infinite"}}/>}{loading?"Authenticating...":"Sign In"}</button></div>{!isElectron&&<p style={{textAlign:"center",fontSize:9,color:"rgba(245,158,11,.6)",marginTop:16,marginBottom:0}}>Desktop shell not detected — sign-in unavailable</p>}<p style={{textAlign:"center",fontSize:10,color:"rgba(255,255,255,.2)",marginTop:isElectron?24:8,letterSpacing:1.5,marginBottom:0}}>Sovalius Corporation · Per aspera ad astra</p></div></div>);
 }
 
 /* ═══ DECISION PANEL (with notes history) ═══ */
 function DP({violation:v,onAction:oA,user:us,compact:cp=false,approveRef:aR,dismissRef:dR,notesBoxRef:nBR,onUndo:oU,revising:isR}){
   const t=T[useContext(ThC)],st=useContext(StC);const[notes,sN]=useState(v.notes||"");const[done,sD]=useState(null);const lr=useRef(null);const cd=useCD(v.reviewedAt);
-  useEffect(()=>{sN(isR?v.notes||"":"");sD(null);},[v.id,isR]);useEffect(()=>{if(nBR)nBR.current=lr.current;});
-  const doA=s=>{const ml=st.minNoteLength||0;if(!notes.trim()||notes.trim().length<ml)return;oA(v.id,s,notes);sD(s);};
+  const[busy,sBusy]=useState(null);const[err,sErr]=useState("");
+  useEffect(()=>{sN(isR?v.notes||"":"");sD(null);sErr("");sBusy(null);},[v.id,isR]);useEffect(()=>{if(nBR)nBR.current=lr.current;});
+  // Enforcement gate, shown BEFORE the reviewer commits. citable===false is
+  // the rack's "this can never become a citation" verdict and the gateway
+  // refuses to record an approval for it; a case with no evidence at all is
+  // equally un-approvable. Both are surfaced here so the reviewer is never
+  // surprised by a server refusal.
+  const noEvidence=!v.remoteClipUrl&&!v.remoteRawClipUrl&&!v.remoteScreenshotUrl;
+  const blockApprove=v.citable===false?(v.gateReason||"Marked non-citable by the enforcement gate")
+    :noEvidence?"No evidence is attached to this case":"";
+  // A DECISION IS ONLY REAL ONCE THE SERVER SAYS SO. `done` is set from the
+  // gateway's confirmation, never optimistically — the old code set it before
+  // the write and showed "CONFIRMED" for rejected decisions.
+  const doA=async s=>{
+    const ml=st.minNoteLength||0;if(!notes.trim()||notes.trim().length<ml)return;
+    if(s==="approved"&&blockApprove){sErr(`Cannot approve — ${blockApprove}`);return;}
+    if(busy)return;
+    sErr("");sBusy(s);
+    const res=await oA(v.id,s,notes);
+    sBusy(null);
+    if(res&&res.ok){sD(s);}else{sErr((res&&res.error)||"The decision was not recorded");}
+  };
   useEffect(()=>{if(aR)aR.current=()=>doA("approved");if(dR)dR.current=()=>doA("dismissed");});
   const ml=st.minNoteLength||0;const ok=notes.trim().length>=Math.max(1,ml);const rv=v.status!=="pending"&&v.reviewedAt&&!isR;const w24=v.reviewedAt&&(Date.now()-new Date(v.reviewedAt).getTime()<86400000);
-  if(rv&&!done)return(<div><div style={{padding:14,borderRadius:14,textAlign:"center",background:v.status==="approved"?"rgba(52,211,153,.08)":"rgba(248,113,113,.08)",border:`1px solid ${v.status==="approved"?"rgba(52,211,153,.2)":"rgba(248,113,113,.2)"}`}}><p style={{fontSize:16,margin:"0 0 4px",fontWeight:800,color:v.status==="approved"?"#34d399":"#f87171"}}>{v.status==="approved"?"✓ APPROVED":"✕ DISMISSED"}</p><p style={{fontSize:11,color:t.tD,margin:"0 0 4px"}}>by {v.reviewedBy}</p>{w24&&<p style={{fontSize:12,color:"#f59e0b",margin:0,fontFamily:"'JetBrains Mono',monospace"}}>{cd} to revise</p>}</div>{w24&&<div style={{display:"flex",gap:10,marginTop:10}}><button onClick={()=>oU&&oU(v.id)} style={{flex:1,padding:"9px 0",borderRadius:10,border:"1px solid rgba(248,113,113,.3)",background:"rgba(248,113,113,.08)",color:"#f87171",fontSize:12,fontWeight:700,cursor:"pointer"}}>↩ Undo</button></div>}</div>);
+  if(rv&&!done)return(<div><div style={{padding:14,borderRadius:14,textAlign:"center",background:v.status==="approved"?"rgba(52,211,153,.08)":"rgba(248,113,113,.08)",border:`1px solid ${v.status==="approved"?"rgba(52,211,153,.2)":"rgba(248,113,113,.2)"}`}}><p style={{fontSize:16,margin:"0 0 4px",fontWeight:800,color:v.status==="approved"?"#34d399":"#f87171"}}>{v.status==="approved"?"✓ APPROVED":"✕ DISMISSED"}</p><p style={{fontSize:11,color:t.tD,margin:"0 0 4px"}}>by {v.reviewedBy}</p>{w24&&<p style={{fontSize:12,color:"#f59e0b",margin:0,fontFamily:"'JetBrains Mono',monospace"}}>{cd} to revise</p>}</div>{w24&&<div style={{display:"flex",gap:10,marginTop:10}}><button onClick={async()=>{if(!oU||busy)return;sErr("");sBusy("undo");const r=await oU(v.id);sBusy(null);if(!(r&&r.ok))sErr((r&&r.error)||"The decision could not be reopened");}} disabled={busy==="undo"} style={{flex:1,padding:"9px 0",borderRadius:10,border:"1px solid rgba(248,113,113,.3)",background:"rgba(248,113,113,.08)",color:"#f87171",fontSize:12,fontWeight:700,cursor:busy?"not-allowed":"pointer"}}>{busy==="undo"?"REOPENING…":"↩ Undo"}</button></div>}{err&&<div role="alert" style={{marginTop:10,padding:"9px 12px",borderRadius:8,background:"rgba(248,113,113,.12)",border:"1px solid rgba(248,113,113,.35)",fontSize:12,color:"#f87171",fontWeight:600}}>✕ {err}</div>}</div>);
   if(done)return(<div style={{padding:cp?14:18,borderRadius:14,textAlign:"center",background:done==="approved"?"rgba(52,211,153,.08)":"rgba(248,113,113,.08)"}}><p style={{fontSize:cp?16:20,margin:"0 0 4px",fontWeight:800,color:done==="approved"?"#34d399":"#f87171"}}>{done==="approved"?"✓ CONFIRMED":"✕ DISMISSED"}</p><p style={{fontSize:12,color:"#f59e0b",margin:0,fontFamily:"'JetBrains Mono',monospace"}}>24h to revise</p></div>);
   return(<div>
     {isR&&<><div style={{padding:"8px 12px",borderRadius:8,marginBottom:12,background:"rgba(167,139,250,.1)",border:"1px solid rgba(167,139,250,.2)",fontSize:12,color:"#a78bfa",fontWeight:600}}>✎ Revising — submit new verdict</div><NotesHistory history={v.history}/></>}
     <label style={{fontSize:10,color:t.tD,textTransform:"uppercase",letterSpacing:1.5,marginBottom:7,display:"block",fontWeight:600}}>Notes <Kbd>/</Kbd></label>
     <textarea ref={lr} value={notes} onChange={e=>sN(e.target.value)} rows={cp?2:3} placeholder="Required..." style={{width:"100%",padding:"10px 12px",borderRadius:10,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tx,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
     {st.quickNotes?.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>{st.quickNotes.map((q,i)=>(<button key={i} onClick={()=>sN(q)} style={{padding:"2px 8px",borderRadius:5,border:`1px solid ${t.iBo}`,background:t.iB,color:t.tM,fontSize:9,cursor:"pointer"}}>{q.length>25?q.slice(0,25)+"…":q}</button>))}</div>}
-    <div style={{display:"flex",gap:10,marginTop:10}}><button onClick={()=>doA("approved")} disabled={!ok} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:ok?"linear-gradient(135deg,#059669,#34d399)":t.iB,color:ok?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>✓ APPROVE</button><button onClick={()=>doA("dismissed")} disabled={!ok} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:ok?"linear-gradient(135deg,#dc2626,#f87171)":t.iB,color:ok?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>✕ DISMISS</button></div>
+    {blockApprove&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.25)",fontSize:11,color:"#f59e0b",fontWeight:600}}>⚠ Approval blocked — {blockApprove}. This case can still be dismissed.</div>}
+    {v.citable===null&&!blockApprove&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:"rgba(96,165,250,.1)",border:"1px solid rgba(96,165,250,.25)",fontSize:11,color:"#60a5fa",fontWeight:600}}>ℹ Citation eligibility not yet determined — an approval is recorded, but no citation is minted until the enforcement gate confirms.</div>}
+    {err&&<div role="alert" style={{marginTop:10,padding:"9px 12px",borderRadius:8,background:"rgba(248,113,113,.12)",border:"1px solid rgba(248,113,113,.35)",fontSize:12,color:"#f87171",fontWeight:600}}>✕ {err}</div>}
+    <div style={{display:"flex",gap:10,marginTop:10}}>{(()=>{const aOk=ok&&!busy&&!blockApprove,dOk=ok&&!busy;return(<>
+      <button onClick={()=>doA("approved")} disabled={!aOk} title={blockApprove||undefined} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:aOk?"linear-gradient(135deg,#059669,#34d399)":t.iB,color:aOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:aOk?"pointer":"not-allowed"}}>{busy==="approved"?"RECORDING…":"✓ APPROVE"}</button>
+      <button onClick={()=>doA("dismissed")} disabled={!dOk} style={{flex:1,padding:"11px 0",borderRadius:10,border:"none",background:dOk?"linear-gradient(135deg,#dc2626,#f87171)":t.iB,color:dOk?"#fff":t.tF,fontSize:13,fontWeight:700,cursor:dOk?"pointer":"not-allowed"}}>{busy==="dismissed"?"RECORDING…":"✕ DISMISS"}</button>
+    </>);})()}</div>
   </div>);
 }
 function MT({violation:v}){const t=T[useContext(ThC)],st=useContext(StC);return(<div>{[{l:"Plate",v:v.plate,m:1},{l:"Vehicle",v:v.vehicle},v.speed?{l:"Speed",v:`${v.speed}/${v.limit} km/h`,m:1,c:"#f87171"}:null,{l:"Location",v:v.location},{l:"Camera",v:v.camera,m:1},{l:"Date",v:fD(v.date)},{l:"Time",v:fT(v.date,st.timeFormat),m:1},{l:"Weather",v:v.weather}].filter(Boolean).map((f,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${t.dv}`}}><span style={{fontSize:11,color:t.tD,textTransform:"uppercase",letterSpacing:.8,fontWeight:600}}>{f.l}</span><span style={{fontSize:12,fontWeight:600,color:f.c||t.tx,fontFamily:f.m?"'JetBrains Mono',monospace":"inherit"}}>{f.v}</span></div>))}</div>);}
@@ -971,20 +1063,63 @@ export default function App(){
 
   const t=T[th];const colors=st.colorBlind?CSC.cb:CSC.default;
 
-  const timeout=useSessionTimeout(user?st.sessionTimeout||30:0,()=>sUser(null));
+  // ---- sign-out actually ENDS the session -----------------------------------
+  // The old handler only repainted the renderer back to the login page: the
+  // main-process tokens stayed live, the loaded cases stayed in memory and the
+  // 15s poller kept running, so the next person at the desk inherited the
+  // previous reviewer's data and authority. Now: revoke server-side, drop the
+  // tokens, clear every case/audit/notification, and stop polling.
+  const signOut=useCallback(async()=>{
+    prefsSaveEnabled.current=false;
+    try{if(isEl&&window.hopeAuth&&window.hopeAuth.logout)await window.hopeAuth.logout();}catch{/* tokens are dropped regardless */}
+    db.reset();
+    sNotifs([]);sShowNotifs(false);sSel(null);sRevId(null);sPage("dashboard");sCs(false);
+    sUser(null);
+  },[isEl,db]);
+
+  const timeout=useSessionTimeout(user?st.sessionTimeout||30:0,signOut);
   const unreadCount=notifs.filter(n=>!n.read).length;
 
-  const act=(id,s,n)=>{
-    sVs(p=>p.map(v=>v.id===id?{...v,status:s,notes:n,reviewedBy:user?.name||"Officer",reviewedAt:new Date().toISOString(),history:[...(v.history||[]),{action:s,by:user?.name||"Officer",at:new Date().toISOString(),notes:n}]}:v));
-    sAuditLog(p=>[{id:Date.now(),officer:user?.name||"Officer",action:s,violationId:id,at:new Date().toISOString(),notes:n},...p]);
-    db.persistAction(id,s,n,user?.name||"Officer");
-    sRevId(null);
+  // ---- decisions: THE SERVER IS AUTHORITATIVE -------------------------------
+  // Nothing about a case changes on screen until the gateway has confirmed the
+  // write. A privilege failure, an enforcement-gate refusal, a validation
+  // error or a dropped connection must all read as a FAILED decision — the
+  // screen may never show "approved" for something the gateway rejected.
+  // The returned {ok,error} is what the decision panel renders.
+  const applyServerRow=(id,row)=>{
+    if(!row)return;
+    sVs(p=>p.map(v=>v.id===id?{...v,
+      status:row.status||"pending",
+      notes:row.notes??v.notes,
+      pinned:row.pinned??v.pinned,
+      reviewedBy:row.reviewed_by??null,
+      reviewedAt:row.reviewed_at??null,
+      history:row.history||v.history||[],
+    }:v));
   };
-  const pin=id=>sVs(p=>p.map(v=>v.id===id?{...v,pinned:!v.pinned}:v));
-  const undo=id=>{
-    sVs(p=>p.map(v=>v.id===id?{...v,status:"pending",reviewedBy:null,reviewedAt:null,notes:"",history:[...(v.history||[]),{action:"undone",by:user?.name||"Officer",at:new Date().toISOString(),notes:"Decision undone"}]}:v));
-    sAuditLog(p=>[{id:Date.now(),officer:user?.name||"Officer",action:"undone",violationId:id,at:new Date().toISOString(),notes:""},...p]);
-    db.persistAction(id,"pending","Decision undone",user?.name||"Officer");
+  const act=async(id,s,n)=>{
+    const res=await db.persistAction(id,s,n);
+    if(!res||!res.ok)return res||{ok:false,error:"The decision could not be recorded"};
+    applyServerRow(id,res.row);
+    sRevId(null);
+    // Re-pull the tamper-evident audit chain the SERVER wrote (the client
+    // never invents audit rows).
+    db.refreshAll();
+    return{ok:true};
+  };
+  const pin=async id=>{
+    const cur=vs.find(v=>v.id===id);
+    const res=await db.persistPin(id,!cur?.pinned);
+    if(!res||!res.ok)return res||{ok:false,error:"Pin could not be saved"};
+    applyServerRow(id,res.row);
+    return{ok:true};
+  };
+  const undo=async id=>{
+    const res=await db.persistAction(id,"pending","Decision undone");
+    if(!res||!res.ok)return res||{ok:false,error:"The decision could not be reopened"};
+    applyServerRow(id,res.row);
+    db.refreshAll();
+    return{ok:true};
   };
   const revise=id=>{const v=vs.find(x=>x.id===id);if(v){sSel(v);sRevId(id);}};
 
@@ -1022,7 +1157,7 @@ export default function App(){
             <button onClick={()=>sCs(x=>!x)} style={{background:t.iB,border:`1px solid ${t.iBo}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",color:t.tD,fontSize:12}}>⌨</button>
             <button onClick={()=>{sPage("settings");sSel(null);}} style={{background:page==="settings"?"rgba(167,139,250,.15)":t.iB,border:`1px solid ${page==="settings"?"rgba(167,139,250,.3)":t.iBo}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",color:page==="settings"?"#a78bfa":t.tD,fontSize:14}}>⚙</button>
             <div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:32,height:32,borderRadius:10,background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:"#fff"}}>{user.name[0]?.toUpperCase()}</div><div><p style={{fontSize:12,fontWeight:600,margin:0,color:t.tx}}>{user.name}</p><p style={{fontSize:10,margin:0,color:"#a78bfa",fontWeight:500,textTransform:"capitalize"}}>{user.role}</p></div></div>
-            <button onClick={()=>sUser(null)} style={{background:t.iB,border:`1px solid ${t.iBo}`,borderRadius:8,padding:"5px 12px",cursor:"pointer",color:t.tD,fontSize:11,fontWeight:600}}>Sign Out</button>
+            <button onClick={signOut} style={{background:t.iB,border:`1px solid ${t.iBo}`,borderRadius:8,padding:"5px 12px",cursor:"pointer",color:t.tD,fontSize:11,fontWeight:600}}>Sign Out</button>
           </div>
         </div>
 
@@ -1036,9 +1171,9 @@ export default function App(){
           {page==="settings"&&<Settings settings={st} setSettings={sSt} user={user} theme={th} setTheme={sTh} keybinds={kb} setKeybinds={sKb} appVersion={appVer}/>}
         </div>
         <div style={{textAlign:"center",padding:"18px 0",borderTop:`1px solid ${t.dv}`,fontSize:10,color:t.tF,letterSpacing:2,marginTop:24,display:"flex",justifyContent:"center",alignItems:"center",gap:12}}>
-          <span>SOVALIUS CORPORATION · H.O.P.E. v1.0 · PER ASPERA AD ASTRA</span>
+          <span>SOVALIUS CORPORATION · H.O.P.E. v{appVer} · PER ASPERA AD ASTRA</span>
           <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:3,background:db.dbConnected?"#34d399":db.dbError?"#f87171":"#f59e0b"}}/>
-          <span style={{fontSize:9}}>{db.dbConnected?"DB Connected":db.dbError?"DB Offline":"Demo Mode"}</span></span>
+          <span style={{fontSize:9}}>{db.dbConnected?"Gateway connected":db.dbError?`Gateway offline — ${db.dbError}`:"Connecting…"}</span></span>
         </div>
         {updateReady&&<div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:9999,background:"linear-gradient(135deg,rgba(99,102,241,.95),rgba(139,92,246,.95))",backdropFilter:"blur(12px)",padding:"10px 28px",display:"flex",alignItems:"center",justifyContent:"center",gap:16,borderTop:"1px solid rgba(255,255,255,.1)"}}>
           <span style={{fontSize:12,fontWeight:600,color:"#fff"}}>Update v{updInfo.version} downloaded — will install on restart</span>

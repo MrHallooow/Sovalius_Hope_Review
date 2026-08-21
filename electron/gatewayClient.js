@@ -206,6 +206,35 @@ async function login(username, password) {
   return { ok: true, user: r.data.user };
 }
 
+/**
+ * End the desk session for real.
+ *
+ * Revokes the refresh-token FAMILY server-side (so no outstanding ancestor can
+ * be replayed), then drops both tokens from main-process memory and resets the
+ * login gate — a later db:test-connection blocks on the NEXT login instead of
+ * silently serving the previous user's data. Always resolves ok: a network
+ * failure must never leave a reviewer signed in on the desk, and the local
+ * tokens are dropped either way.
+ */
+async function logout() {
+  const rt = tokens.refresh;
+  tokens.access = null;
+  tokens.refresh = null;
+  refreshInFlight = null;
+  loginWaiters = [];
+  if (!rt) return { ok: true };
+  try {
+    await fetch(baseUrl + "/auth/logout", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ refreshToken: rt }),
+    });
+  } catch {
+    /* tokens are already gone locally; the server pair expires on its own */
+  }
+  return { ok: true };
+}
+
 function _legacyUserRow(u) {
   // Legacy auth:list-users / auth:register rows used the DB column names.
   return {
@@ -538,6 +567,7 @@ module.exports = {
   request,
   testConnection,
   login,
+  logout,
   register,
   listUsers,
   updateUser,

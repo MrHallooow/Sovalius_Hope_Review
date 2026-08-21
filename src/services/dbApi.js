@@ -6,57 +6,57 @@ export async function testConnection() {
 }
 
 export async function getViolations() {
-  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, rows: [], error: "Desktop bridge unavailable" };
   return window.hopeDb.getViolations();
 }
 
 export async function getCameras() {
-  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, rows: [], error: "Desktop bridge unavailable" };
   return window.hopeDb.getCameras();
 }
 
 export async function getAuditLog() {
-  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, rows: [], error: "Desktop bridge unavailable" };
   return window.hopeDb.getAuditLog();
 }
 
 export async function updateViolation(id, fields) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.updateViolation(id, fields);
 }
 
 export async function insertAudit(entry) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.insertAudit(entry);
 }
 
 export async function rawQuery(sql, params) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.query(sql, params);
 }
 
 export async function getNotifications() {
-  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, rows: [], error: "Desktop bridge unavailable" };
   return window.hopeDb.getNotifications();
 }
 
 export async function markNotificationRead(id) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.markNotificationRead(id);
 }
 
 export async function markAllNotificationsRead() {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.markAllNotificationsRead();
 }
 
 export async function updateCamera(id, fields) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.updateCamera(id, fields);
 }
 
 export async function getAnalytics() {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.getAnalytics();
 }
 
@@ -72,17 +72,17 @@ export async function getEvidenceUrls(violationId) {
 }
 
 export async function getCameraLanes(cameraName) {
-  if (!isElectron) return { ok: false, data: null, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, data: null, error: "Desktop bridge unavailable" };
   return window.hopeDb.getCameraLanes(cameraName);
 }
 
 export async function getAllCameraLanes() {
-  if (!isElectron) return { ok: false, rows: [], error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, rows: [], error: "Desktop bridge unavailable" };
   return window.hopeDb.getAllCameraLanes();
 }
 
 export async function saveCameraLanes(cameraName, laneData, calWidth, calHeight) {
-  if (!isElectron) return { ok: false, error: "No DB (demo mode)" };
+  if (!isElectron) return { ok: false, error: "Desktop bridge unavailable" };
   return window.hopeDb.saveCameraLanes(cameraName, laneData, calWidth, calHeight);
 }
 

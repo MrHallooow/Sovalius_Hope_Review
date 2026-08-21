@@ -36,7 +36,13 @@ contextBridge.exposeInMainWorld("hopeAuth", {
     ipcRenderer.invoke("auth:update-user", userId, fields),
   changePassword: (userId, newPassword) =>
     ipcRenderer.invoke("auth:change-password", userId, newPassword),
+  logout: () => ipcRenderer.invoke("auth:logout"),
   deleteUser: (userId) => ipcRenderer.invoke("auth:delete-user", userId),
+});
+
+contextBridge.exposeInMainWorld("hopeSystem", {
+  // Real, pre-login gateway readiness — what the splash screen reports.
+  gatewayHealth: () => ipcRenderer.invoke("system:gateway-health"),
 });
 
 contextBridge.exposeInMainWorld("hopeEvidence", {

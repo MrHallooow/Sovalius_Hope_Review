@@ -5,7 +5,6 @@ import {
   getCameras,
   getAuditLog,
   updateViolation,
-  insertAudit,
   isDbAvailable,
 } from "./dbApi.js";
 
@@ -139,34 +138,39 @@ export function useDbData(fallbackViolations, fallbackCameras, fallbackAudit) {
     return () => { cancelled = true; };
   }, []);
 
+  /**
+   * Record a review decision. THE SERVER IS AUTHORITATIVE.
+   *
+   * Resolves to `{ok:true, row}` carrying the review row the gateway actually
+   * wrote, or `{ok:false, error}` — callers must not show a decision as
+   * recorded until this says ok. reviewed_by / reviewed_at / history are
+   * server-derived (token user + server clock) and are never sent from here;
+   * the tamper-evident audit row is written server-side in the same
+   * transaction, so no client-side audit entry is fabricated either.
+   */
   const persistAction = useCallback(
-    async (violationId, status, notes, officerName) => {
-      if (!dbConnected) return;
-
-      const now = new Date().toISOString();
-      const current = violations.find((v) => v.id === violationId);
-      const prevHistory = Array.isArray(current?.history) ? current.history : [];
-      const newHistory = [
-        ...prevHistory,
-        { action: status, by: officerName, at: now, notes },
-      ];
-
-      await updateViolation(violationId, {
-        status,
-        notes,
-        reviewed_by: officerName,
-        reviewed_at: now,
-        history: newHistory,
-      });
-      await insertAudit({
-        officer: officerName,
-        action: status,
-        violationId,
-        at: now,
-        notes,
-      });
+    async (violationId, status, notes) => {
+      if (!dbConnected) {
+        return { ok: false, error: "Not connected to the review gateway" };
+      }
+      const res = await updateViolation(violationId, { status, notes });
+      if (res && res.ok) return { ok: true, row: res.row || null };
+      return { ok: false, error: (res && res.error) || "The gateway rejected this decision" };
     },
-    [dbConnected, violations]
+    [dbConnected]
+  );
+
+  /** Persist a pin. Pins are part of the review record, not local UI state. */
+  const persistPin = useCallback(
+    async (violationId, pinned) => {
+      if (!dbConnected) {
+        return { ok: false, error: "Not connected to the review gateway" };
+      }
+      const res = await updateViolation(violationId, { pinned: !!pinned });
+      if (res && res.ok) return { ok: true, row: res.row || null };
+      return { ok: false, error: (res && res.error) || "The gateway rejected this change" };
+    },
+    [dbConnected]
   );
 
   const refreshViolations = useCallback(async () => {
@@ -193,7 +197,25 @@ export function useDbData(fallbackViolations, fallbackCameras, fallbackAudit) {
     return () => clearInterval(i);
   }, [dbConnected, refreshAll]);
 
+  /**
+   * Drop every loaded case, audit row and camera on sign-out.
+   *
+   * Clearing dbConnected also tears down the 15s refresh interval, so a
+   * signed-out desk stops polling the gateway. A second reviewer at the same
+   * desk starts from an empty app and must authenticate before any case is
+   * fetched again.
+   */
+  const reset = useCallback(() => {
+    setDbConnected(false);
+    setDbError(null);
+    setViolations([]);
+    setCameras([]);
+    setAuditLog([]);
+    setLoading(false);
+  }, []);
+
   return {
+    reset,
     dbConnected,
     dbError,
     loading,
@@ -204,6 +226,8 @@ export function useDbData(fallbackViolations, fallbackCameras, fallbackAudit) {
     auditLog,
     setAuditLog,
     persistAction,
+    persistPin,
     refreshViolations,
+    refreshAll,
   };
 }
