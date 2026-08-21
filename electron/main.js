@@ -1,7 +1,17 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { autoUpdater } = require("electron-updater");
-const gateway = require("./gatewayClient.js");
+
+// ── Data path ──
+// DIRECT (v1.6.2 behaviour): PGHOST present -> the main process talks straight
+// to Postgres/S3 and nothing else has to be running.
+// GATEWAY: no PGHOST -> talk to the review gateway over localhost HTTP.
+// Both modules export an IDENTICAL surface, so every IPC handler below and
+// every row shape the renderer sees is the same either way.
+const USE_DIRECT_DB = !!process.env.PGHOST;
+const gateway = USE_DIRECT_DB
+  ? require("./dbClient.js")
+  : require("./gatewayClient.js");
 
 const isDev = !app.isPackaged;
 
@@ -38,7 +48,11 @@ if (isDev) {
   }
 }
 
-gateway.init(process.env.GATEWAY_URL);
+if (USE_DIRECT_DB) {
+  gateway.init();
+} else {
+  gateway.init(process.env.GATEWAY_URL);
+}
 
 // ── Renderer hardening ──
 // The renderer displays evidence and mediates enforcement decisions, so it is
@@ -73,6 +87,11 @@ function cspFor(gatewayOrigin) {
 }
 
 function gatewayOrigin() {
+  // Direct mode fetches evidence from S3 presigned URLs, whose exact host
+  // depends on bucket/region/path-style. Allow https: for the media/data
+  // directives rather than guessing wrong and blanking every clip; script-src
+  // stays locked to the app itself.
+  if (USE_DIRECT_DB) return "https:";
   try {
     return new URL(gateway.getBaseUrl()).origin;
   } catch {
@@ -182,7 +201,7 @@ ipcMain.handle("system:gateway-health", async () => {
   // does NOT wait for a login — the splash must report what is actually true
   // before anyone has signed in.
   const r = await gateway.testConnection();
-  return { ...r, url: gateway.getBaseUrl() };
+  return { ...r, url: gateway.getBaseUrl(), mode: USE_DIRECT_DB ? "database" : "gateway" };
 });
 
 ipcMain.handle("db:query", async () => {
