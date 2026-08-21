@@ -23,7 +23,13 @@ win:
       arch:
         - x64
   artifactName: "HOPE-Review-Setup-${version}.${ext}"
-  signAndEditExecutable: false
+  # App icon: the Zeta mark, taken from the sovalius-mobile app icon
+  # (ios/.../Icon-App-1024x1024@1x.png) so desktop and mobile match.
+  icon: build/icon.ico
+  # signAndEditExecutable:false skipped icon + version metadata as WELL as
+  # signing, which is why builds shipped with the default Electron icon.
+  # signExecutable:false skips ONLY the signing step.
+  signExecutable: false
 
 nsis:
   oneClick: false

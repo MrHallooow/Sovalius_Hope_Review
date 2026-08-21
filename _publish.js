@@ -5,14 +5,20 @@ const { execSync } = require("child_process");
 
 const OWNER = "MrHallooow";
 const REPO = "Sovalius_Hope_Review";
-const TAG = "v1.6.2";
-const NAME = "v1.6.2";
-const BODY = `- Fix login: use require() for production config instead of dotenv + asar file reads
-- Eliminates all env file bundling issues permanently`;
+
+// The version comes from package.json — the same source electron-builder used
+// to name the installer and to write dist/latest.yml. It used to be hard-coded
+// (v1.6.2) and drifted: publishing would have uploaded the OLD installer
+// alongside the NEW latest.yml, and every desk's auto-updater would then read
+// "1.7.0 available", request HOPE-Review-Setup-1.7.0.exe, and 404.
+const VERSION = require("./package.json").version;
+const TAG = `v${VERSION}`;
+const NAME = `v${VERSION}`;
+const BODY = process.env.RELEASE_NOTES || `Release v${VERSION}`;
 
 const ASSETS = [
-  "dist/HOPE-Review-Setup-1.6.2.exe",
-  "dist/HOPE-Review-Setup-1.6.2.exe.blockmap",
+  `dist/HOPE-Review-Setup-${VERSION}.exe`,
+  `dist/HOPE-Review-Setup-${VERSION}.exe.blockmap`,
   "dist/latest.yml",
 ];
 
@@ -80,6 +86,28 @@ function upload(uploadUrl, filePath) {
 }
 
 (async () => {
+  // Verify EVERY asset exists before touching the remote release. This script
+  // deletes the existing release for the tag before creating the new one, so a
+  // missing file used to mean the old release was destroyed and nothing
+  // replaced it.
+  const missing = ASSETS.filter((f) => !fs.existsSync(f));
+  if (missing.length) {
+    console.error(`Refusing to publish ${TAG}: missing ${missing.join(", ")}`);
+    console.error("Run `npm run package` first.");
+    process.exit(1);
+  }
+
+  // latest.yml is what electron-updater reads; if it does not describe THIS
+  // version the published release is self-inconsistent.
+  const feed = fs.readFileSync("dist/latest.yml", "utf8");
+  if (!feed.includes(`version: ${VERSION}`)) {
+    console.error(`Refusing to publish: dist/latest.yml does not describe ${VERSION}.`);
+    console.error("Re-run `npm run package` so the updater feed matches the installer.");
+    process.exit(1);
+  }
+
+  console.log(`Publishing ${TAG} (${ASSETS.length} assets)`);
+  console.log("NOTE: this installer is unsigned unless a signing certificate was configured.");
   console.log("Deleting old release if exists...");
   const old = await api("GET", `/repos/${OWNER}/${REPO}/releases/tags/${TAG}`);
   if (old.status === 200) {
