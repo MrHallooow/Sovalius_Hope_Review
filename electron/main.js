@@ -8,10 +8,12 @@ const { autoUpdater } = require("electron-updater");
 // GATEWAY: no PGHOST -> talk to the review gateway over localhost HTTP.
 // Both modules export an IDENTICAL surface, so every IPC handler below and
 // every row shape the renderer sees is the same either way.
-const USE_DIRECT_DB = !!process.env.PGHOST;
-const gateway = USE_DIRECT_DB
-  ? require("./dbClient.js")
-  : require("./gatewayClient.js");
+//
+// DECIDED AFTER dotenv RUNS, not here: PGHOST arrives from the .env, so
+// reading it at module-load time would always see an empty value and silently
+// pick the gateway on a machine configured for direct mode.
+let USE_DIRECT_DB = false;
+let gateway = null;
 
 const isDev = !app.isPackaged;
 
@@ -48,10 +50,15 @@ if (isDev) {
   }
 }
 
+// .env has been loaded by this point -- now the data path can be chosen.
+USE_DIRECT_DB = !!process.env.PGHOST;
+gateway = USE_DIRECT_DB ? require("./dbClient.js") : require("./gatewayClient.js");
 if (USE_DIRECT_DB) {
   gateway.init();
+  console.log("[hope] data path: DIRECT postgres ->", process.env.PGHOST);
 } else {
   gateway.init(process.env.GATEWAY_URL);
+  console.log("[hope] data path: gateway ->", gateway.getBaseUrl());
 }
 
 // ── Renderer hardening ──
